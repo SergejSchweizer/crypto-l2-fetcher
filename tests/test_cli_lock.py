@@ -157,3 +157,66 @@ def test_all_history_mode_uses_all_history_fetch(monkeypatch: pytest.MonkeyPatch
     assert len(calls) == 1
     assert calls[0]["exchange"] == "binance"
     assert calls[0]["symbol"] == "BTCUSDT"
+
+
+def test_main_ingest_command_does_not_acquire_single_instance_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailIfEnteredLock:
+        def __init__(self, lock_path: str) -> None:
+            del lock_path
+
+        def __enter__(self) -> None:
+            raise AssertionError("lock should not be used for ingest command")
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            del exc_type, exc, tb
+
+    monkeypatch.setattr(cli, "SingleInstanceLock", FailIfEnteredLock)
+    monkeypatch.setattr(cli, "load_timescale_config_from_env", lambda: object())
+    monkeypatch.setattr(
+        cli,
+        "ingest_parquet_to_timescaledb",
+        lambda **kwargs: {"files_scanned": 0, "files_ingested": 0, "rows_upserted": 0, "files_skipped": 0},
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["main.py", "ingest-parquet-to-db", "--lake-root", "lake/bronze", "--no-json-output"],
+    )
+
+    cli.main()
+
+
+def test_main_fetcher_command_still_uses_single_instance_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Locked:
+        def __init__(self, lock_path: str) -> None:
+            del lock_path
+
+        def __enter__(self) -> None:
+            raise SingleInstanceError("fetcher already running")
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+            del exc_type, exc, tb
+
+    monkeypatch.setattr(cli, "SingleInstanceLock", Locked)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "main.py",
+            "fetcher",
+            "--exchange",
+            "binance",
+            "--market",
+            "spot",
+            "--symbols",
+            "BTCUSDT",
+            "--timeframe",
+            "1m",
+            "--limit",
+            "1",
+            "--no-json-output",
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="fetcher already running"):
+        cli.main()

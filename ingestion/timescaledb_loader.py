@@ -21,16 +21,48 @@ class TimescaleConfig:
     user: str
     password: str
     dbname: str
+    sslmode: str
 
 
-def load_timescale_config_from_env() -> TimescaleConfig:
-    """Load TimescaleDB config from environment variables."""
+def _read_env_file(path: Path) -> dict[str, str]:
+    """Read simple KEY=VALUE pairs from an env file if present."""
 
-    host = os.getenv("TIMESCALEDB_HOST", "127.0.0.1")
-    port_raw = os.getenv("TIMESCALEDB_PORT", "5432")
-    user = os.getenv("TIMESCALEDB_USER", "postgres")
-    password = os.getenv("TIMESCALEDB_PASSWORD", "postgres")
-    dbname = os.getenv("TIMESCALEDB_DB", "postgres")
+    if not path.exists():
+        return {}
+
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def load_timescale_config_from_env(env_file: str = ".env") -> TimescaleConfig:
+    """Load TimescaleDB config from environment variables with .env fallback."""
+
+    file_values = _read_env_file(Path(env_file))
+
+    host = os.getenv("TIMESCALEDB_HOST", file_values.get("TIMESCALEDB_HOST", "127.0.0.1"))
+    port_raw = os.getenv("TIMESCALEDB_PORT", file_values.get("TIMESCALEDB_PORT", "5432"))
+    user = os.getenv("TIMESCALEDB_USER", file_values.get("TIMESCALEDB_USER", "postgres"))
+    password = os.getenv("TIMESCALEDB_PASSWORD", file_values.get("TIMESCALEDB_PASSWORD", "postgres"))
+    dbname = os.getenv("TIMESCALEDB_DB", file_values.get("TIMESCALEDB_DB", "postgres"))
+    sslmode = os.getenv(
+        "TIMESCALEDB_SSLMODE",
+        os.getenv(
+            "PGSSLMODE",
+            file_values.get("TIMESCALEDB_SSLMODE", file_values.get("PGSSLMODE", "disable")),
+        ),
+    )
 
     try:
         port = int(port_raw)
@@ -43,6 +75,7 @@ def load_timescale_config_from_env() -> TimescaleConfig:
         user=user,
         password=password,
         dbname=dbname,
+        sslmode=sslmode,
     )
 
 
@@ -60,13 +93,14 @@ def list_parquet_files(lake_root: str, dataset_types: list[DatasetType] | None =
     if not root.exists():
         return []
 
-    selected = set(dataset_types) if dataset_types else {"spot_ohlcv", "perp_ohlcv"}
+    selected = set(dataset_types) if dataset_types else {"ohlcv"}
     files: list[Path] = []
     for dataset_type in selected:
         files.extend(
             sorted(
                 root.glob(
-                    f"dataset_type={dataset_type}/exchange=*/symbol=*/timeframe=*/data.parquet"
+                    "dataset_type="
+                    f"{dataset_type}/exchange=*/instrument_type=*/symbol=*/timeframe=*/date=*/data.parquet"
                 )
             )
         )
@@ -121,17 +155,24 @@ def _ensure_tables(connection: Any) -> None:
             """
         )
 
-        # Best-effort hypertable conversion if Timescale extension is available.
-        cursor.execute(
-            """
-            SELECT create_hypertable(
-                'market_ohlcv',
-                'open_time',
-                if_not_exists => TRUE,
-                migrate_data => TRUE
-            );
-            """
-        )
+        # Best-effort hypertable conversion. If TimescaleDB extension is unavailable
+        # (for example missing shared library on server), continue with plain Postgres table.
+        cursor.execute("SAVEPOINT sp_create_hypertable;")
+        try:
+            cursor.execute(
+                """
+                SELECT create_hypertable(
+                    'market_ohlcv',
+                    'open_time',
+                    if_not_exists => TRUE,
+                    migrate_data => TRUE
+                );
+                """
+            )
+            cursor.execute("RELEASE SAVEPOINT sp_create_hypertable;")
+        except Exception:
+            cursor.execute("ROLLBACK TO SAVEPOINT sp_create_hypertable;")
+            cursor.execute("RELEASE SAVEPOINT sp_create_hypertable;")
 
 
 def _load_ingestion_state(connection: Any) -> dict[str, FileSignature]:
@@ -292,6 +333,7 @@ def ingest_parquet_to_timescaledb(
         user=config.user,
         password=config.password,
         dbname=config.dbname,
+        sslmode=config.sslmode,
     ) as connection:
         _ensure_tables(connection)
         state = _load_ingestion_state(connection)

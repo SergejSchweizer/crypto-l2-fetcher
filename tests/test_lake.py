@@ -37,11 +37,13 @@ def _sample_candle() -> SpotCandle:
 
 def test_partition_key_and_path() -> None:
     candle = _sample_candle()
-    key = candle_partition_key(candle)
-    assert key == ("binance", "BTCUSDT", "1m")
+    key = candle_partition_key(candle=candle, market="spot")
+    assert key == ("binance", "spot", "BTCUSDT", "1m", "2026-04")
 
-    result = partition_path("lake/bronze", "spot_ohlcv", key)
-    assert str(result).endswith("dataset_type=spot_ohlcv/exchange=binance/symbol=BTCUSDT/timeframe=1m")
+    result = partition_path("lake/bronze", "ohlcv", key)
+    assert str(result).endswith(
+        "dataset_type=ohlcv/exchange=binance/instrument_type=spot/symbol=BTCUSDT/timeframe=1m/date=2026-04"
+    )
 
 
 
@@ -50,7 +52,7 @@ def test_candle_record_contains_core_fields() -> None:
     ingested_at = datetime(2026, 4, 27, 12, 0, tzinfo=timezone.utc)
     record = candle_record(candle=candle, market="spot", run_id="run-1", ingested_at=ingested_at)
 
-    assert record["dataset_type"] == "spot_ohlcv"
+    assert record["dataset_type"] == "ohlcv"
     assert record["instrument_type"] == "spot"
     assert record["run_id"] == "run-1"
     assert record["open"] == 100.0
@@ -62,6 +64,7 @@ def test_merge_and_deduplicate_rows_keeps_latest_record() -> None:
     second_time = datetime(2026, 4, 27, 11, 0, tzinfo=timezone.utc)
     base = {
         "exchange": "binance",
+        "instrument_type": "spot",
         "symbol": "BTCUSDT",
         "timeframe": "1m",
         "open_time": first_time,

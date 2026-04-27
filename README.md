@@ -1,4 +1,4 @@
-# L2 Synchronizer
+# crypto-l2-fetcher
 
 ## 1. Project Overview
 
@@ -71,7 +71,7 @@ Parquet/DB row metadata fields:
 | Variable | Type | Description |
 |---|---|---|
 | `schema_version` | `str` | Version marker for row schema evolution (`v1` currently). |
-| `dataset_type` | `str` | Dataset family label (`spot_ohlcv` or `perp_ohlcv`). |
+| `dataset_type` | `str` | Dataset family label (`ohlcv`). |
 | `instrument_type` | `str` | Market class used for fetch (`spot` or `perp`). |
 | `event_time` | `datetime (UTC)` | Canonical event timestamp for the row (currently aligned to `open_time`). |
 | `ingested_at` | `datetime (UTC)` | Wall-clock timestamp when the row was written by the pipeline. |
@@ -86,45 +86,55 @@ Parquet/DB row metadata fields:
 Fetch latest BTC/ETH spot candles:
 
 ```bash
-python3 main.py fetch-spot --exchange binance --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --limit 5
+python3 main.py fetcher --exchange binance --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --limit 5
 ```
 
 Fetch multiple exchanges in one run:
 
 ```bash
-python3 main.py fetch-spot --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M1 --limit 10
+python3 main.py fetcher --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M1 --limit 10
 ```
 
 Fetch multiple timeframes in one run (parallelized across exchange/symbol/timeframe):
 
 ```bash
-python3 main.py fetch-spot --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframes M1 M5 H1 --limit 120 --no-json-output
+python3 main.py fetcher --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframes M1 M5 H1 --limit 120 --no-json-output
 ```
 
 Fetch and generate plots (price + volume) under `plots/`:
 
 ```bash
-python3 main.py fetch-spot --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M5 --limit 200 --plot --plot-dir plots --plot-price close
+python3 main.py fetcher --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M5 --limit 200 --plot --plot-dir plots --plot-price close
 ```
 
 Save fetched data to parquet lake format:
 
 ```bash
-python3 main.py fetch-spot --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --limit 1200 --save-parquet-lake --lake-root lake/bronze
+python3 main.py fetcher --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --limit 1200 --save-parquet-lake --lake-root lake/bronze
 ```
 
-Parquet lake write mode uses a stable file per partition (`data.parquet`) with staged merge+rewrite on each run to keep file counts bounded.
+Parquet lake write mode uses a stable file per partition (`data.parquet`) with staged merge+rewrite on each run to keep file counts bounded. Partition schema:
+
+```text
+dataset_type=ohlcv/
+  exchange=<exchange>/
+  instrument_type=<spot|perp>/
+  symbol=<symbol>/
+  timeframe=<interval>/
+  date=<YYYY-MM>/
+    data.parquet
+```
 
 Fetch all available history from exchanges (can be long-running):
 
 ```bash
-python3 main.py fetch-spot --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M1 --all-history --save-parquet-lake --lake-root lake/bronze --no-json-output
+python3 main.py fetcher --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M1 --all-history --save-parquet-lake --lake-root lake/bronze --no-json-output
 ```
 
 Run gap-fill mode (default when `--limit` is omitted): detects and fills all missing candles within stored history and also backfills from latest stored candle to current closed candle.
 
 ```bash
-python3 main.py fetch-spot --exchange binance --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --save-parquet-lake --lake-root lake/bronze
+python3 main.py fetcher --exchange binance --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --save-parquet-lake --lake-root lake/bronze
 ```
 
 If no parquet data exists and `--limit` is omitted, the script bootstraps with the maximum single-request amount supported by the exchange/timeframe.
@@ -132,13 +142,13 @@ If no parquet data exists and `--limit` is omitted, the script bootstraps with t
 Use explicit latest mode without a fixed count:
 
 ```bash
-python3 main.py fetch-spot --exchange deribit --market perp --symbols BTC ETH --timeframe M5 --mode latest
+python3 main.py fetcher --exchange deribit --market perp --symbols BTC ETH --timeframe M5 --mode latest
 ```
 
 Run silently without JSON output:
 
 ```bash
-python3 main.py fetch-spot --exchange binance --market spot --symbols BTCUSDT --timeframe M1 --limit 100 --no-json-output
+python3 main.py fetcher --exchange binance --market spot --symbols BTCUSDT --timeframe M1 --limit 100 --no-json-output
 ```
 
 Ingest parquet lake files into TimescaleDB:
@@ -149,19 +159,21 @@ export TIMESCALEDB_PORT=54321
 export TIMESCALEDB_USER=crypto
 export TIMESCALEDB_PASSWORD=784542
 export TIMESCALEDB_DB=crypto
-python3 main.py ingest-parquet-to-db --lake-root lake/bronze --dataset-types spot_ohlcv --batch-size 2000
+python3 main.py ingest-parquet-to-db --lake-root lake/bronze --dataset-types ohlcv --batch-size 2000
 ```
+
+The loader reads TimescaleDB settings from root `.env` by default (`TIMESCALEDB_*`, `PGSSLMODE`). Exported environment variables override `.env` values.
 
 Fetch more than 1000 candles (automatic pagination):
 
 ```bash
-python3 main.py fetch-spot --exchange binance --market spot --symbols BTCUSDT --timeframe M1 --limit 1200
+python3 main.py fetcher --exchange binance --market spot --symbols BTCUSDT --timeframe M1 --limit 1200
 ```
 
 Fetch Binance + Deribit perpetual candles:
 
 ```bash
-python3 main.py fetch-spot --exchanges binance deribit --market perp --symbols BTCUSDT ETHUSDT --timeframe M5 --limit 50
+python3 main.py fetcher --exchanges binance deribit --market perp --symbols BTCUSDT ETHUSDT --timeframe M5 --limit 50
 ```
 
 List all currently supported spot timeframes:
@@ -209,9 +221,9 @@ mypy .
 
 - For now this is a local CLI tool.
 - Next stage will add scheduled runs and database persistence.
-- The CLI enforces a single running instance using `.run/l2-synchronizer.lock`.
-- Runtime logs are written to `/volume1/Temp/logs/l2-synchronizer.log` by default.
-- Logs rotate every 7 days and rotated files are date-suffixed (for example `l2-synchronizer.log.2026-04-27`) and retained in the same directory.
+- The CLI enforces a single running instance using `.run/crypto-l2-fetcher.lock`.
+- Runtime logs are written to `/volume1/Temp/logs/crypto-l2-fetcher.log` by default.
+- Logs rotate every 7 days and rotated files are date-suffixed (for example `crypto-l2-fetcher.log.2026-04-27`) and retained in the same directory.
 - Optional override: set `L2_SYNC_LOG_DIR` to change the log directory.
 
 ### 9.1 TimescaleDB via Docker Compose

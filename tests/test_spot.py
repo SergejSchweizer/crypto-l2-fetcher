@@ -174,6 +174,72 @@ def test_fetch_binance_perp_routes_to_futures_endpoint(monkeypatch: pytest.Monke
     assert candles[0].symbol == "BTCUSDT"
 
 
+def test_fetch_binance_spot_routes_to_spot_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ingestion.exchanges import binance as binance_exchange
+
+    calls: list[str] = []
+
+    def fake_get_json(url: str, params: dict[str, object] | None = None, timeout_s: float = 15.0) -> object:
+        del timeout_s
+        calls.append(url)
+        assert params is not None
+        assert params["symbol"] == "BTCUSDT"
+        return [
+            [1000, "1", "2", "0.5", "1.5", "10", 1999, "15", 2, "0", "0", "0"],
+            [2000, "1.5", "2.2", "1.0", "2.0", "12", 2999, "20", 3, "0", "0", "0"],
+        ]
+
+    monkeypatch.setattr(binance_exchange, "get_json", fake_get_json)
+    candles = fetch_candles(exchange="binance", market="spot", symbol="BTCUSDT", interval="1m", limit=2)
+
+    assert len(candles) == 2
+    assert calls[0] == "https://api.binance.com/api/v3/klines"
+    assert candles[0].symbol == "BTCUSDT"
+
+
+@pytest.mark.parametrize(
+    ("market", "symbol", "expected_instrument", "expected_symbol"),
+    [
+        ("spot", "BTCUSDT", "BTC_USDC", "BTC_USDC"),
+        ("perp", "BTC", "BTC-PERPETUAL", "BTC-PERPETUAL"),
+    ],
+)
+def test_fetch_deribit_routes_spot_and_perp_symbols(
+    monkeypatch: pytest.MonkeyPatch,
+    market: str,
+    symbol: str,
+    expected_instrument: str,
+    expected_symbol: str,
+) -> None:
+    from ingestion.exchanges import deribit as deribit_exchange
+
+    captured_instruments: list[str] = []
+
+    def fake_get_json(url: str, params: dict[str, object] | None = None, timeout_s: float = 15.0) -> object:
+        del url, timeout_s
+        assert params is not None
+        captured_instruments.append(str(params["instrument_name"]))
+        return {
+            "result": {
+                "status": "ok",
+                "ticks": [1000, 2000],
+                "open": [1, 2],
+                "high": [1, 2],
+                "low": [1, 2],
+                "close": [1, 2],
+                "volume": [1, 2],
+            }
+        }
+
+    monkeypatch.setattr(deribit_exchange, "_utc_now_ms", lambda: 10_000)
+    monkeypatch.setattr(deribit_exchange, "get_json", fake_get_json)
+
+    candles = fetch_candles(exchange="deribit", market=market, symbol=symbol, interval="1m", limit=2)
+    assert len(candles) == 2
+    assert captured_instruments[0] == expected_instrument
+    assert candles[0].symbol == expected_symbol
+
+
 def test_fetch_all_history_routes_to_exchange_all_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     from ingestion.exchanges import deribit as deribit_exchange
 
@@ -198,3 +264,56 @@ def test_fetch_all_history_routes_to_exchange_all_fetch(monkeypatch: pytest.Monk
     candles = fetch_candles_all_history(exchange="deribit", market="spot", symbol="BTCUSDT", interval="1m")
     assert len(candles) == 3
     assert [int(item.open_time.timestamp()) for item in candles] == [1, 2, 3]
+
+
+@pytest.mark.parametrize(
+    ("exchange", "market", "input_symbol", "expected_fetch_symbol", "expected_candle_symbol"),
+    [
+        ("binance", "spot", "BTCUSDT", "BTCUSDT", "BTCUSDT"),
+        ("binance", "perp", "BTC", "BTCUSDT", "BTCUSDT"),
+        ("deribit", "spot", "BTCUSDT", "BTCUSDT", "BTC_USDC"),
+        ("deribit", "perp", "BTC", "BTC", "BTC-PERPETUAL"),
+    ],
+)
+def test_fetch_all_history_supports_spot_and_perp_on_both_exchanges(
+    monkeypatch: pytest.MonkeyPatch,
+    exchange: str,
+    market: str,
+    input_symbol: str,
+    expected_fetch_symbol: str,
+    expected_candle_symbol: str,
+) -> None:
+    row = [1000, "1", "1", "1", "1", "1", 1999, "1", 1, "0", "0", "0"]
+
+    if exchange == "binance":
+        from ingestion.exchanges import binance as binance_exchange
+
+        captured: list[dict[str, object]] = []
+
+        def fake_fetch_klines_all(symbol: str, interval: str, market: str = "spot") -> list[list[object]]:
+            captured.append({"symbol": symbol, "interval": interval, "market": market})
+            return [row]
+
+        monkeypatch.setattr(binance_exchange, "fetch_klines_all", fake_fetch_klines_all)
+    else:
+        from ingestion.exchanges import deribit as deribit_exchange
+
+        captured = []
+
+        def fake_fetch_klines_all(symbol: str, market: str, interval: str) -> list[list[object]]:
+            captured.append({"symbol": symbol, "interval": interval, "market": market})
+            return [row]
+
+        monkeypatch.setattr(deribit_exchange, "fetch_klines_all", fake_fetch_klines_all)
+
+    candles = fetch_candles_all_history(
+        exchange=exchange,
+        market=market,
+        symbol=input_symbol,
+        interval="1m",
+    )
+
+    assert len(candles) == 1
+    assert captured[0]["symbol"] == expected_fetch_symbol
+    assert captured[0]["market"] == market
+    assert candles[0].symbol == expected_candle_symbol

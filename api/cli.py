@@ -32,7 +32,7 @@ from ingestion.spot import (
 from ingestion.timescaledb_loader import ingest_parquet_to_timescaledb, load_timescale_config_from_env
 
 FetchMode = Literal["latest", "gap-fill"]
-LOGGER_NAME = "l2_synchronizer"
+LOGGER_NAME = "crypto_l2_fetcher"
 DEFAULT_LOG_DIR = "/volume1/Temp/logs"
 
 
@@ -56,7 +56,7 @@ class SingleInstanceLock:
             os.close(self._fd)
             self._fd = None
             raise SingleInstanceError(
-                "Another l2-synchronizer instance is already running. Exiting."
+                "Another crypto-l2-fetcher instance is already running. Exiting."
             ) from exc
         os.ftruncate(self._fd, 0)
         os.write(self._fd, str(os.getpid()).encode("utf-8"))
@@ -84,7 +84,7 @@ def _configure_logging() -> logging.Logger:
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
         file_handler = TimedRotatingFileHandler(
-            filename=log_dir / "l2-synchronizer.log",
+            filename=log_dir / "crypto-l2-fetcher.log",
             when="D",
             interval=7,
             backupCount=0,
@@ -241,10 +241,10 @@ def _fetch_symbol_candles(
 def build_parser() -> argparse.ArgumentParser:
     """Create top-level CLI parser."""
 
-    parser = argparse.ArgumentParser(description="L2 Synchronizer CLI")
+    parser = argparse.ArgumentParser(description="crypto-l2-fetcher CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    spot_parser = subparsers.add_parser("fetch-spot", help="Fetch candles from supported exchanges")
+    spot_parser = subparsers.add_parser("fetcher", help="Fetch candles from supported exchanges")
     spot_parser.add_argument("--exchange", choices=["binance", "deribit"], default="binance")
     spot_parser.add_argument(
         "--exchanges",
@@ -309,7 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
     spot_parser.add_argument(
         "--no-json-output",
         action="store_true",
-        help="Suppress JSON output from fetch-spot command",
+        help="Suppress JSON output from fetcher command",
     )
 
     tf_parser = subparsers.add_parser("list-spot-timeframes", help="List exchange-supported candle timeframes")
@@ -339,7 +339,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument(
         "--dataset-types",
         nargs="+",
-        choices=["spot_ohlcv", "perp_ohlcv"],
+        choices=["ohlcv"],
         help="Optional dataset type filter",
     )
     ingest_parser.add_argument(
@@ -356,13 +356,13 @@ def main() -> None:
     """CLI entrypoint."""
 
     logger = _configure_logging()
-    try:
-        with SingleInstanceLock(".run/l2-synchronizer.lock"):
-            parser = build_parser()
-            args = parser.parse_args()
-            logger.info("Command start: %s", args.command)
+    parser = build_parser()
+    args = parser.parse_args()
+    logger.info("Command start: %s", args.command)
 
-            if args.command == "fetch-spot":
+    if args.command == "fetcher":
+        try:
+            with SingleInstanceLock(".run/crypto-l2-fetcher.lock"):
                 if args.all_history and args.limit is not None:
                     parser.error("--all-history cannot be combined with --limit")
                 exchanges = cast(list[Exchange], args.exchanges if args.exchanges else [args.exchange])
@@ -478,34 +478,33 @@ def main() -> None:
 
                 if not args.no_json_output:
                     print(json.dumps(output, indent=2))
-                logger.info("Command complete: fetch-spot")
+                logger.info("Command complete: fetcher")
+        except SingleInstanceError as exc:
+            logger.warning("Single-instance lock active")
+            raise SystemExit(str(exc)) from exc
 
-            elif args.command == "list-spot-timeframes":
-                exchanges = cast(list[Exchange], args.exchanges if args.exchanges else [args.exchange])
-                output = {exchange: list(list_supported_intervals(exchange=exchange)) for exchange in exchanges}
-                print(json.dumps(output, indent=2))
-                logger.info("Command complete: list-spot-timeframes")
+    elif args.command == "list-spot-timeframes":
+        exchanges = cast(list[Exchange], args.exchanges if args.exchanges else [args.exchange])
+        output = {exchange: list(list_supported_intervals(exchange=exchange)) for exchange in exchanges}
+        print(json.dumps(output, indent=2))
+        logger.info("Command complete: list-spot-timeframes")
 
-            elif args.command == "ingest-parquet-to-db":
-                config = load_timescale_config_from_env()
-                summary = ingest_parquet_to_timescaledb(
-                    lake_root=args.lake_root,
-                    config=config,
-                    batch_size=args.batch_size,
-                    dataset_types=cast(list[str] | None, args.dataset_types),
-                )
-                if not args.no_json_output:
-                    print(json.dumps(summary, indent=2))
-                logger.info(
-                    "Command complete: ingest-parquet-to-db files_scanned=%s files_ingested=%s rows_upserted=%s",
-                    summary.get("files_scanned", 0),
-                    summary.get("files_ingested", 0),
-                    summary.get("rows_upserted", 0),
-                )
-
-    except SingleInstanceError as exc:
-        logger.warning("Single-instance lock active")
-        raise SystemExit(str(exc)) from exc
+    elif args.command == "ingest-parquet-to-db":
+        config = load_timescale_config_from_env()
+        summary = ingest_parquet_to_timescaledb(
+            lake_root=args.lake_root,
+            config=config,
+            batch_size=args.batch_size,
+            dataset_types=cast(list[str] | None, args.dataset_types),
+        )
+        if not args.no_json_output:
+            print(json.dumps(summary, indent=2))
+        logger.info(
+            "Command complete: ingest-parquet-to-db files_scanned=%s files_ingested=%s rows_upserted=%s",
+            summary.get("files_scanned", 0),
+            summary.get("files_ingested", 0),
+            summary.get("rows_upserted", 0),
+        )
 
 
 if __name__ == "__main__":

@@ -12,8 +12,8 @@ from typing import DefaultDict
 from ingestion.spot import SpotCandle
 
 DatasetType = str
-PartitionKey = tuple[str, str, str]
-NaturalKey = tuple[str, str, str, datetime]
+PartitionKey = tuple[str, str, str, str, str]
+NaturalKey = tuple[str, str, str, str, datetime]
 
 
 
@@ -24,13 +24,15 @@ def utc_run_id() -> str:
 
 
 
-def candle_partition_key(candle: SpotCandle) -> PartitionKey:
-    """Build partition key as exchange/symbol/timeframe."""
+def candle_partition_key(candle: SpotCandle, market: str) -> PartitionKey:
+    """Build partition key as exchange/instrument_type/symbol/timeframe/date."""
 
     return (
         candle.exchange,
+        market,
         candle.symbol,
         candle.interval,
+        candle.open_time.strftime("%Y-%m"),
     )
 
 
@@ -38,13 +40,15 @@ def candle_partition_key(candle: SpotCandle) -> PartitionKey:
 def partition_path(lake_root: str, dataset_type: DatasetType, key: PartitionKey) -> Path:
     """Return destination path for one parquet partition."""
 
-    exchange, symbol, timeframe = key
+    exchange, instrument_type, symbol, timeframe, date_partition = key
     return (
         Path(lake_root)
         / f"dataset_type={dataset_type}"
         / f"exchange={exchange}"
+        / f"instrument_type={instrument_type}"
         / f"symbol={symbol}"
         / f"timeframe={timeframe}"
+        / f"date={date_partition}"
     )
 
 
@@ -54,7 +58,7 @@ def candle_record(candle: SpotCandle, market: str, run_id: str, ingested_at: dat
 
     return {
         "schema_version": "v1",
-        "dataset_type": "spot_ohlcv" if market == "spot" else "perp_ohlcv",
+        "dataset_type": "ohlcv",
         "exchange": candle.exchange,
         "symbol": candle.symbol,
         "instrument_type": market,
@@ -83,7 +87,13 @@ def record_natural_key(record: dict[str, object]) -> NaturalKey:
     open_time = record["open_time"]
     if not isinstance(open_time, datetime):
         raise ValueError("open_time must be datetime")
-    return (str(record["exchange"]), str(record["symbol"]), str(record["timeframe"]), open_time)
+    return (
+        str(record["exchange"]),
+        str(record["instrument_type"]),
+        str(record["symbol"]),
+        str(record["timeframe"]),
+        open_time,
+    )
 
 
 def merge_and_deduplicate_rows(existing: list[dict[str, object]], new: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -114,20 +124,24 @@ def open_times_in_lake(
     except ImportError as exc:
         raise RuntimeError("pyarrow is required for parquet lake output. Install project dependencies.") from exc
 
-    dataset_type = "spot_ohlcv" if market == "spot" else "perp_ohlcv"
-    data_file = (
+    dataset_type = "ohlcv"
+    partition_root = (
         Path(lake_root)
         / f"dataset_type={dataset_type}"
         / f"exchange={exchange}"
+        / f"instrument_type={market}"
         / f"symbol={symbol}"
         / f"timeframe={timeframe}"
-        / "data.parquet"
     )
-    if not data_file.exists():
+    if not partition_root.exists():
         return []
 
-    table = pq.ParquetFile(data_file).read(columns=["open_time"])
-    values = [value for value in table.column("open_time").to_pylist() if isinstance(value, datetime)]
+    values: list[datetime] = []
+    for data_file in sorted(partition_root.glob("date=*/data.parquet")):
+        table = pq.ParquetFile(data_file).read(columns=["open_time"])
+        values.extend(
+            [value for value in table.column("open_time").to_pylist() if isinstance(value, datetime)]
+        )
     return sorted(set(values))
 
 
@@ -158,14 +172,14 @@ def save_spot_candles_parquet_lake(
 
     run_id = utc_run_id()
     ingested_at = datetime.now(timezone.utc)
-    dataset_type = "spot_ohlcv" if market == "spot" else "perp_ohlcv"
+    dataset_type = "ohlcv"
 
     grouped: DefaultDict[PartitionKey, list[dict[str, object]]] = defaultdict(list)
 
     for symbol_map in candles_by_exchange.values():
         for candles in symbol_map.values():
             for candle in candles:
-                key = candle_partition_key(candle)
+                key = candle_partition_key(candle=candle, market=market)
                 grouped[key].append(candle_record(candle=candle, market=market, run_id=run_id, ingested_at=ingested_at))
 
     def _write_one_partition(key: PartitionKey, rows: list[dict[str, object]]) -> str:
