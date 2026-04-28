@@ -1,7 +1,7 @@
 # Multi-Exchange OHLCV Ingestion Baseline for Crypto Research Pipelines
 
 ## Abstract
-This report presents a production-oriented baseline for multi-exchange cryptocurrency candle ingestion designed to support downstream quantitative research. The problem addressed is the lack of reproducible, maintainable ingestion layers in early-stage quant projects, where exchange-specific scripts and schema drift frequently undermine empirical validity. We implement a typed, modular ingestion pipeline with adapter abstractions for Binance, Deribit, and Bybit, a command-line interface for deterministic execution (including multi-market runs such as `--market spot perp`), partitioned parquet-lake storage, and incremental parquet-to-TimescaleDB ingestion. Data are sourced from public exchange REST endpoints and normalized into a canonical OHLCV schema with metadata fields for run traceability. The main finding is engineering-focused: the system provides deterministic normalization across heterogeneous API payloads, supports backward pagination and gap-fill synchronization, and preserves idempotent persistence via natural-key upserts. The contribution is a maintainable ingestion foundation suitable for subsequent market microstructure, regime, and forecasting studies, with explicit reproducibility controls (strict typing, tests, linting, and stable execution commands).
+This report presents a production-oriented baseline for multi-exchange cryptocurrency candle ingestion designed to support downstream quantitative research. The problem addressed is the lack of reproducible, maintainable ingestion layers in early-stage quant projects, where exchange-specific scripts and schema drift frequently undermine empirical validity. We implement a typed, modular ingestion pipeline with adapter abstractions for Binance, Deribit, and Bybit, a command-line interface for deterministic execution (including multi-market runs such as `--market spot perp`), and partitioned parquet-lake storage. Data are sourced from public exchange REST endpoints and normalized into a canonical OHLCV schema with metadata fields for run traceability. The main finding is engineering-focused: the system provides deterministic normalization across heterogeneous API payloads, supports backward pagination and gap-fill synchronization, and preserves idempotent persistence via natural-key partition merges. The contribution is a maintainable ingestion foundation suitable for subsequent market microstructure, regime, and forecasting studies, with explicit reproducibility controls (strict typing, tests, linting, and stable execution commands).
 
 ## Introduction
 Reliable market-data ingestion is a prerequisite for valid quantitative inference in crypto research.
@@ -10,7 +10,7 @@ Many practical pipelines fail due to exchange-specific one-off scripts, inconsis
 
 This project proposes a modular ingestion architecture with typed interfaces, explicit normalization, and reproducible command-line workflows.
 
-The contributions of this stage are: (1) cross-exchange OHLCV normalization, (2) parquet-lake and TimescaleDB persistence paths, and (3) tested operational workflows for repeatable data acquisition.
+The contributions of this stage are: (1) cross-exchange OHLCV normalization, (2) parquet-lake persistence paths, and (3) tested operational workflows for repeatable data acquisition.
 
 ## Literature Review
 Volatility clustering and regime dependence motivate robust historical market-data pipelines. ARCH/GARCH foundations establish heteroskedastic behavior in financial time series, requiring high-integrity timestamped observations (Engle, 1982; Bollerslev, 1986). Regime-switching frameworks further highlight sensitivity to data quality and temporal consistency (Hamilton, 1989). Later work on high-frequency econometrics and realized-volatility estimation reinforces the need for reliable, granular data ingestion and synchronization processes (Andersen et al., 2001; Barndorff-Nielsen and Shephard, 2002).
@@ -19,8 +19,8 @@ Within crypto-specific empirical work, market microstructure studies and liquidi
 
 ## Dataset
 - Source: Binance `/api/v3/klines`, Binance Futures `/fapi/v1/klines`, Deribit `/api/v2/public/get_tradingview_chart_data`, Bybit `/v5/market/kline`.
-- Sample period: user-configurable rolling windows, all-history mode, or gap-fill mode.
-- Number of observations: runtime-dependent (`--limit`, `--all-history`, and symbol/timeframe scope).
+- Sample period: user-configurable runtime period determined by symbols, markets, timeframes, and existing parquet coverage.
+- Number of observations: runtime-dependent on symbol/timeframe scope and auto bootstrap vs gap-fill behavior.
 - Variables: `open_time`, `close_time`, `open`, `high`, `low`, `close`, `volume`, `quote_volume`, `trade_count` plus provenance metadata.
 - Cleaning methodology: exchange adapter normalization, timeframe validation, symbol normalization, UTC conversion, partition-level deduplication by natural key.
 - Train/test split: not applicable at ingestion-only stage.
@@ -29,7 +29,7 @@ Within crypto-specific empirical work, market microstructure studies and liquidi
 ### System Design
 ```text
 CLI -> Adapter Layer -> HTTP Client -> Exchange REST APIs
-    -> Normalized SpotCandle -> Parquet Lake -> TimescaleDB Upsert
+    -> Normalized SpotCandle -> Parquet Lake
 ```
 
 ### Core Mapping
@@ -59,7 +59,7 @@ Upsert policy enforces idempotency:
 - Pagination for exchange request limits.
 - Gap-fill computes missing intervals from stored open-time sets.
 - Fetch execution is sequential across exchange/market/symbol/timeframe tasks.
-- Parquet and DB ingest process data in batches to bound memory and transaction scope.
+- Parquet reads/writes process data in batches to bound memory usage.
 
 ## Results
 All figures in this report are generated from repository pipeline outputs (agent-generated plot artifacts), not notebook exports.
@@ -88,7 +88,7 @@ No predictive or regime models are trained in this stage.
 |---|---|---|
 | Multi-exchange fetch | Binance + Deribit + Bybit | Passed via typed adapter dispatch |
 | Gap-fill mode | Missing internal/tail intervals | Passed via open-time range recovery |
-| Incremental DB ingest | Parquet signatures + upsert | Passed with idempotent key policy |
+| Incremental parquet persistence | Partition merge + natural-key dedup | Passed with idempotent key policy |
 
 ### Figures
 Figure 1. Binance BTCUSDT 1m close series.
@@ -129,7 +129,7 @@ This baseline establishes a reproducible and extensible ingestion pipeline for m
 ### Reproducibility Controls
 - Static checks: `ruff`, `mypy` (strict), `pytest`.
 - Deterministic interfaces: typed adapters and normalized candle schema.
-- Incremental persistence: parquet signature tracking and key-based DB upsert.
+- Incremental persistence: partition-level merge and key-based dedup in parquet files.
 
 ## References
 1. Engle, R. F. (1982). Autoregressive Conditional Heteroskedasticity with Estimates of the Variance of U.K. Inflation. *Econometrica*.
@@ -140,5 +140,4 @@ This baseline establishes a reproducible and extensible ingestion pipeline for m
 6. Binance Developer Documentation. Kline/Candlestick Data Endpoints.
 7. Deribit API Documentation. TradingView Chart Data Endpoint.
 8. Bybit API Documentation. Market Kline Endpoint.
-9. Timescale Documentation. Hypertables and Time-Series Ingestion Best Practices.
-10. Apache Arrow Documentation. Parquet RecordBatch Processing.
+9. Apache Arrow Documentation. Parquet RecordBatch Processing.

@@ -7,7 +7,7 @@ from collections import defaultdict
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from ingestion.spot import SpotCandle
 
@@ -264,3 +264,105 @@ def save_spot_candles_parquet_lake(
                 written_files.append(future.result())
 
     return sorted(written_files)
+
+
+def load_combined_dataframe_from_lake(
+    lake_root: str,
+    exchanges: list[str] | None = None,
+    symbols: list[str] | None = None,
+    timeframes: list[str] | None = None,
+    instrument_types: list[str] | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    limit: int | None = None,
+) -> Any:
+    """Load combined spot/perp OHLCV rows from parquet lake as a pandas DataFrame."""
+
+    if limit is not None and limit <= 0:
+        raise ValueError("limit must be positive when provided")
+
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise RuntimeError("pandas is required for dataframe export. Install project dependencies.") from exc
+
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise RuntimeError("pyarrow is required for dataframe export. Install project dependencies.") from exc
+
+    exchange_filter = {item.lower() for item in exchanges} if exchanges else None
+    symbol_filter = {item.upper() for item in symbols} if symbols else None
+    timeframe_filter = {item.lower() for item in timeframes} if timeframes else None
+    instrument_filter = {item.lower() for item in instrument_types} if instrument_types else None
+
+    data_files = sorted(
+        Path(lake_root).glob(
+            "dataset_type=ohlcv/exchange=*/instrument_type=*/symbol=*/timeframe=*/date=*/data.parquet"
+        )
+    )
+
+    frames: list[Any] = []
+    for data_file in data_files:
+        parts = data_file.parts
+        partition_values: dict[str, str] = {}
+        for segment in parts:
+            if "=" not in segment:
+                continue
+            key, value = segment.split("=", 1)
+            partition_values[key] = value
+
+        exchange_value = partition_values.get("exchange", "")
+        instrument_value = partition_values.get("instrument_type", "")
+        symbol_value = partition_values.get("symbol", "")
+        timeframe_value = partition_values.get("timeframe", "")
+
+        if exchange_filter is not None and exchange_value.lower() not in exchange_filter:
+            continue
+        if instrument_filter is not None and instrument_value.lower() not in instrument_filter:
+            continue
+        if symbol_filter is not None and symbol_value.upper() not in symbol_filter:
+            continue
+        if timeframe_filter is not None and timeframe_value.lower() not in timeframe_filter:
+            continue
+
+        parquet_file = pq.ParquetFile(data_file)  # type: ignore[no-untyped-call]
+        for batch in parquet_file.iter_batches(batch_size=10_000):  # type: ignore[no-untyped-call]
+            frame = batch.to_pandas()
+            if start_time is not None:
+                frame = frame[frame["open_time"] >= start_time]
+            if end_time is not None:
+                frame = frame[frame["open_time"] <= end_time]
+            if frame.empty:
+                continue
+            frames.append(frame)
+
+    columns = [
+        "exchange",
+        "instrument_type",
+        "symbol",
+        "timeframe",
+        "open_time",
+        "close_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "quote_volume",
+        "trade_count",
+        "dataset_type",
+        "run_id",
+        "source_endpoint",
+    ]
+    if not frames:
+        return pd.DataFrame(columns=columns)
+
+    dataframe = pd.concat(frames, ignore_index=True)
+    dataframe = dataframe.sort_values(
+        by=["open_time", "exchange", "instrument_type", "symbol", "timeframe"],
+        kind="mergesort",
+    )
+    if limit is not None:
+        dataframe = dataframe.head(limit)
+    return dataframe

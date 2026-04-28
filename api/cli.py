@@ -11,9 +11,10 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 from ingestion.lake import (
+    load_combined_dataframe_from_lake,
     load_spot_candles_from_lake,
     open_times_in_lake,
     save_spot_candles_parquet_lake,
@@ -23,22 +24,14 @@ from ingestion.spot import (
     Exchange,
     Market,
     SpotCandle,
-    fetch_candles,
     fetch_candles_all_history,
     fetch_candles_range,
     interval_to_milliseconds,
     list_supported_intervals,
-    max_candles_per_request,
     normalize_storage_symbol,
     normalize_timeframe,
 )
-from ingestion.timescaledb_loader import (
-    ingest_parquet_to_timescaledb,
-    load_combined_dataframe_from_db,
-    load_timescale_config_from_env,
-)
 
-FetchMode = Literal["latest", "gap-fill"]
 LOGGER_NAME = "crypto_l2_loader"
 DEFAULT_LOG_DIR = "/volume1/Temp/logs"
 
@@ -100,10 +93,11 @@ def _configure_logging() -> logging.Logger:
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     except OSError:
-        stream_handler = logging.StreamHandler()
-        stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
         logger.warning("Falling back to stderr logging; cannot create log directory '%s'", log_dir)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
 
     return logger
 
@@ -163,33 +157,14 @@ def _fetch_symbol_candles(
     market: Market,
     symbol: str,
     timeframe: str,
-    limit: int | None,
-    all_history: bool,
-    mode: FetchMode,
     lake_root: str,
 ) -> list[SpotCandle]:
-    """Fetch candles for one symbol using latest/gap-fill logic."""
+    """Fetch candles for one symbol.
 
-    if all_history:
-        return fetch_candles_all_history(
-            exchange=exchange,
-            symbol=symbol,
-            interval=timeframe,
-            market=market,
-        )
-
-    if limit is not None:
-        return fetch_candles(exchange=exchange, symbol=symbol, interval=timeframe, limit=limit, market=market)
-
-    if mode == "latest":
-        bootstrap_limit = max_candles_per_request(exchange)
-        return fetch_candles(
-            exchange=exchange,
-            symbol=symbol,
-            interval=timeframe,
-            limit=bootstrap_limit,
-            market=market,
-        )
+    Behavior:
+    - If no data exists in parquet lake for the symbol/timeframe, fetch full exchange history.
+    - If data exists, perform gap-fill up to latest fully closed candle.
+    """
 
     storage_symbol = normalize_storage_symbol(exchange=exchange, symbol=symbol, market=market)
     stored_open_times = open_times_in_lake(
@@ -203,13 +178,11 @@ def _fetch_symbol_candles(
     interval_ms = interval_to_milliseconds(exchange=exchange, interval=timeframe)
     end_open_ms = _last_closed_open_ms(interval_ms=interval_ms)
     if not stored_open_times:
-        bootstrap_limit = max_candles_per_request(exchange)
-        return fetch_candles(
+        return fetch_candles_all_history(
             exchange=exchange,
             symbol=symbol,
-            interval=timeframe,
-            limit=bootstrap_limit,
             market=market,
+            interval=timeframe,
         )
     if end_open_ms < int(min(stored_open_times).timestamp() * 1000):
         return []
@@ -248,6 +221,34 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
     return datetime.fromisoformat(normalized)
+
+
+def _default_export_filename(
+    exchanges: list[str] | None,
+    symbols: list[str] | None,
+    timeframes: list[str] | None,
+    file_format: str,
+) -> str:
+    """Build default export filename from requested data scope."""
+
+    exchange_part = exchanges[0].lower() if exchanges and len(exchanges) == 1 else "multi"
+    symbol_part = symbols[0].upper() if symbols and len(symbols) == 1 else "multi"
+    timeframe_part = timeframes[0].lower() if timeframes and len(timeframes) == 1 else "multi"
+    extension = "parquet" if file_format == "parquet" else "csv"
+    return f"{exchange_part}_{symbol_part}_{timeframe_part}_full.{extension}"
+
+
+def _grouped_export_filename(exchange: str, symbol: str, timeframe: str, file_format: str) -> str:
+    """Build export filename for one exchange/symbol/timeframe group."""
+
+    extension = "parquet" if file_format == "parquet" else "csv"
+    return f"{exchange}_{symbol}_{timeframe}_full.{extension}"
+
+
+def _grouped_plot_filename(exchange: str, symbol: str, timeframe: str) -> str:
+    """Build plot filename for one exchange/symbol/timeframe group."""
+
+    return f"{exchange}_{symbol}_{timeframe}_full.png"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -289,23 +290,6 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="Optional list of timeframes. When set, fetch runs for each timeframe sequentially.",
     )
-    spot_parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Optional latest-candle count. If omitted, gap-fill mode is used by default unless --all-history is set.",
-    )
-    spot_parser.add_argument(
-        "--all-history",
-        action="store_true",
-        help="Fetch all available exchange history for each instrument/timeframe.",
-    )
-    spot_parser.add_argument(
-        "--mode",
-        choices=["latest", "gap-fill"],
-        default="gap-fill",
-        help="Fetch behavior when --limit is omitted.",
-    )
     spot_parser.add_argument("--plot", action="store_true", help="Create and save price/volume plots")
     spot_parser.add_argument("--plot-dir", default="plots", help="Output directory for generated plots")
     spot_parser.add_argument(
@@ -339,41 +323,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional list of exchanges to list in one run",
     )
 
-    ingest_parser = subparsers.add_parser(
-        "ingest-parquet-to-db",
-        help="Ingest parquet lake files into TimescaleDB",
+    export_parser = subparsers.add_parser(
+        "export-df",
+        help="Load combined spot/perp dataset from parquet lake and export as dataframe file",
     )
-    ingest_parser.add_argument(
+    export_parser.add_argument(
         "--lake-root",
         default="lake/bronze",
         help="Root directory for parquet lake files",
     )
-    ingest_parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=1000,
-        help="Upsert batch size for database inserts",
-    )
-    ingest_parser.add_argument(
-        "--dataset-types",
-        nargs="+",
-        choices=["ohlcv"],
-        help="Optional dataset type filter",
-    )
-    ingest_parser.add_argument(
-        "--no-json-output",
-        action="store_true",
-        help="Suppress JSON output from ingest-parquet-to-db command",
-    )
-
-    export_parser = subparsers.add_parser(
-        "export-combined-df",
-        help="Query combined spot/perp dataset from DB and export as dataframe file",
-    )
     export_parser.add_argument(
         "--output",
-        default="combined_spot_perp.parquet",
-        help="Output file path for dataframe export",
+        default=None,
+        help="Output directory for dataframe exports. Defaults to current directory.",
     )
     export_parser.add_argument(
         "--format",
@@ -421,7 +383,7 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument(
         "--no-json-output",
         action="store_true",
-        help="Suppress JSON summary output from export-combined-df command",
+        help="Suppress JSON summary output from export-df command",
     )
 
     return parser
@@ -438,21 +400,12 @@ def main() -> None:
     if args.command == "loader":
         try:
             with SingleInstanceLock(".run/crypto-l2-loader.lock"):
-                if args.all_history and args.limit is not None:
-                    parser.error("--all-history cannot be combined with --limit")
                 exchanges = cast(list[Exchange], args.exchanges if args.exchanges else [args.exchange])
-                mode = cast(FetchMode, args.mode)
                 markets = cast(list[Market], args.market)
                 multi_market = len(markets) > 1
                 requested_timeframes = cast(list[str], args.timeframes if args.timeframes else [args.timeframe])
                 multi_timeframe = len(requested_timeframes) > 1
-                if args.all_history:
-                    effective_mode = "all-history"
-                elif args.limit is not None:
-                    effective_mode = "latest-limit"
-                else:
-                    effective_mode = mode
-                output: dict[str, object] = {"_effective_mode": effective_mode}
+                output: dict[str, object] = {}
                 candles_for_storage: dict[Market, dict[str, dict[str, list[SpotCandle]]]] = {}
                 tasks: list[tuple[Exchange, Market, str, str]] = []
 
@@ -479,18 +432,36 @@ def main() -> None:
 
                 task_results: dict[tuple[Exchange, Market, str, str], list[SpotCandle]] = {}
                 task_errors: dict[tuple[Exchange, Market, str, str], str] = {}
-                for exchange, market, symbol, timeframe in tasks:
+                total_tasks = len(tasks)
+                for idx, (exchange, market, symbol, timeframe) in enumerate(tasks, start=1):
                     key = (exchange, market, symbol, timeframe)
+                    logger.info(
+                            "Fetch start [%s/%s] exchange=%s market=%s symbol=%s timeframe=%s mode=%s",
+                        idx,
+                        total_tasks,
+                        exchange,
+                        market,
+                        symbol,
+                        timeframe,
+                            "auto-bootstrap-or-gap-fill",
+                    )
                     try:
                         task_results[key] = _fetch_symbol_candles(
                             exchange=exchange,
                             market=market,
                             symbol=symbol,
                             timeframe=timeframe,
-                            limit=args.limit,
-                            all_history=args.all_history,
-                            mode=mode,
                             lake_root=args.lake_root,
+                        )
+                        logger.info(
+                            "Fetch complete [%s/%s] exchange=%s market=%s symbol=%s timeframe=%s candles=%s",
+                            idx,
+                            total_tasks,
+                            exchange,
+                            market,
+                            symbol,
+                            timeframe,
+                            len(task_results[key]),
                         )
                     except Exception as exc:  # noqa: BLE001
                         task_errors[key] = str(exc)
@@ -612,29 +583,11 @@ def main() -> None:
         print(json.dumps(output, indent=2))
         logger.info("Command complete: list-spot-timeframes")
 
-    elif args.command == "ingest-parquet-to-db":
-        config = load_timescale_config_from_env()
-        summary = ingest_parquet_to_timescaledb(
-            lake_root=args.lake_root,
-            config=config,
-            batch_size=args.batch_size,
-            dataset_types=cast(list[str] | None, args.dataset_types),
-        )
-        if not args.no_json_output:
-            print(json.dumps(summary, indent=2))
-        logger.info(
-            "Command complete: ingest-parquet-to-db files_scanned=%s files_ingested=%s rows_upserted=%s",
-            summary.get("files_scanned", 0),
-            summary.get("files_ingested", 0),
-            summary.get("rows_upserted", 0),
-        )
-
-    elif args.command == "export-combined-df":
-        config = load_timescale_config_from_env()
+    elif args.command == "export-df":
         start_time = _parse_iso_datetime(cast(str | None, args.start_time))
         end_time = _parse_iso_datetime(cast(str | None, args.end_time))
-        dataframe = load_combined_dataframe_from_db(
-            config=config,
+        dataframe = load_combined_dataframe_from_lake(
+            lake_root=args.lake_root,
             exchanges=cast(list[str] | None, args.exchanges),
             symbols=cast(list[str] | None, args.symbols),
             timeframes=cast(list[str] | None, args.timeframes),
@@ -644,24 +597,140 @@ def main() -> None:
             limit=cast(int | None, args.limit),
         )
 
-        output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        if args.format == "parquet":
-            dataframe.to_parquet(output_path, index=False)
-        else:
-            dataframe.to_csv(output_path, index=False)
+        output_arg = cast(str | None, args.output)
+        output_dir = Path(output_arg) if output_arg else Path(".")
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        grouped = dataframe.groupby(["exchange", "symbol", "timeframe"], dropna=False, sort=True)
+        output_paths: list[str] = []
+        plot_paths: list[str] = []
+        generated_files: list[dict[str, object]] = []
+        group_count = 0
+        for group_key, group_frame in grouped:
+            exchange_value, symbol_value, timeframe_value = group_key
+            file_name = _grouped_export_filename(
+                exchange=str(exchange_value),
+                symbol=str(symbol_value),
+                timeframe=str(timeframe_value),
+                file_format=cast(str, args.format),
+            )
+            output_path = output_dir / file_name
+            if args.format == "parquet":
+                group_frame.to_parquet(output_path, index=False)
+            else:
+                group_frame.to_csv(output_path, index=False)
+            output_paths.append(str(output_path.resolve()))
+
+            candles_for_plot: list[SpotCandle] = []
+            sorted_group = group_frame.sort_values(by=["open_time", "instrument_type"], kind="mergesort")
+            for row in sorted_group.to_dict(orient="records"):
+                open_time = row["open_time"]
+                close_time = row["close_time"]
+                if not isinstance(open_time, datetime):
+                    continue
+                if not isinstance(close_time, datetime):
+                    continue
+                candles_for_plot.append(
+                    SpotCandle(
+                        exchange=str(exchange_value),
+                        symbol=str(symbol_value),
+                        interval=str(timeframe_value),
+                        open_time=open_time,
+                        close_time=close_time,
+                        open_price=float(row["open"]),
+                        high_price=float(row["high"]),
+                        low_price=float(row["low"]),
+                        close_price=float(row["close"]),
+                        volume=float(row["volume"]),
+                        quote_volume=float(row["quote_volume"]),
+                        trade_count=int(row["trade_count"]),
+                    )
+                )
+
+            if candles_for_plot:
+                plot_symbol_key = str(Path(_grouped_plot_filename(
+                    exchange=str(exchange_value),
+                    symbol=str(symbol_value),
+                    timeframe=str(timeframe_value),
+                )).stem)
+                generated_plot_paths = save_candle_plots(
+                    candles_by_exchange={str(exchange_value): {plot_symbol_key: candles_for_plot}},
+                    output_dir=str(output_dir),
+                    price_field="spot",
+                )
+                if generated_plot_paths:
+                    target_plot = output_dir / _grouped_plot_filename(
+                        exchange=str(exchange_value),
+                        symbol=str(symbol_value),
+                        timeframe=str(timeframe_value),
+                    )
+                    Path(generated_plot_paths[0]).replace(target_plot)
+                    plot_paths.append(str(target_plot.resolve()))
+            time_start = None
+            time_end = None
+            if not group_frame.empty and "open_time" in group_frame:
+                time_start = group_frame["open_time"].min()
+                time_end = group_frame["open_time"].max()
+
+            generated_files.append(
+                {
+                    "exchange": str(exchange_value),
+                    "symbol": str(symbol_value),
+                    "timeframe": str(timeframe_value),
+                    "data_file": str(output_path.resolve()),
+                    "plot_file": str((output_dir / _grouped_plot_filename(
+                        exchange=str(exchange_value),
+                        symbol=str(symbol_value),
+                        timeframe=str(timeframe_value),
+                    )).resolve()),
+                    "rows": int(getattr(group_frame, "shape", (0, 0))[0]),
+                    "start_open_time": time_start.isoformat() if isinstance(time_start, datetime) else None,
+                    "end_open_time": time_end.isoformat() if isinstance(time_end, datetime) else None,
+                }
+            )
+            group_count += 1
+
+        if group_count == 0:
+            fallback_name = _default_export_filename(
+                exchanges=cast(list[str] | None, args.exchanges),
+                symbols=cast(list[str] | None, args.symbols),
+                timeframes=cast(list[str] | None, args.timeframes),
+                file_format=cast(str, args.format),
+            )
+            output_path = output_dir / fallback_name
+            if args.format == "parquet":
+                dataframe.to_parquet(output_path, index=False)
+            else:
+                dataframe.to_csv(output_path, index=False)
+            output_paths.append(str(output_path.resolve()))
+            generated_files.append(
+                {
+                    "exchange": None,
+                    "symbol": None,
+                    "timeframe": None,
+                    "data_file": str(output_path.resolve()),
+                    "plot_file": None,
+                    "rows": int(getattr(dataframe, "shape", (0, 0))[0]),
+                    "start_open_time": None,
+                    "end_open_time": None,
+                }
+            )
 
         export_summary: dict[str, object] = {
-            "output": str(output_path.resolve()),
+            "output_dir": str(output_dir.resolve()),
+            "outputs": output_paths,
+            "plots": plot_paths,
+            "generated_files": generated_files,
             "format": args.format,
+            "groups": group_count if group_count > 0 else 1,
             "rows": int(getattr(dataframe, "shape", (0, 0))[0]),
             "columns": list(getattr(dataframe, "columns", [])),
         }
         if not args.no_json_output:
             print(json.dumps(export_summary, indent=2))
         logger.info(
-            "Command complete: export-combined-df output=%s rows=%s",
-            export_summary["output"],
+            "Command complete: export-df outputs=%s rows=%s",
+            export_summary["groups"],
             export_summary["rows"],
         )
 

@@ -11,7 +11,7 @@ Current implemented scope (Step 1):
 ## 2. Architecture Diagram
 
 ```text
-CLI -> Ingestion Adapter -> HTTP Client -> Exchange REST API -> (next step) Database
+CLI -> Ingestion Adapter -> HTTP Client -> Exchange REST API -> Parquet Lake
 ```
 
 ## 3. Installation Guide
@@ -45,9 +45,8 @@ Core dependencies are managed through `pyproject.toml` and include:
 - `ingestion/exchanges/deribit.py`: Deribit adapter with symbol and timeframe mapping.
 - `ingestion/plotting.py`: chart rendering for loaded price and volume data.
 - `ingestion/lake.py`: parquet lake writer for partitioned candle datasets.
-- `ingestion/timescaledb_loader.py`: parquet-to-TimescaleDB ingestion with incremental state tracking.
 - `api/cli.py`: CLI command registration and output formatting.
-- `infra/`: infrastructure artifacts (database init scripts, deployment scaffolding).
+- `infra/`: infrastructure and runtime scaffolding.
 
 ### 5.1 Data Dictionary
 
@@ -68,7 +67,7 @@ Loaded candle variables (`SpotCandle`):
 | `quote_volume` | `float` | Quote-asset traded volume during the interval (or exchange-equivalent field). |
 | `trade_count` | `int` | Number of trades aggregated into the candle (exchange dependent). |
 
-Parquet/DB row metadata fields:
+Parquet row metadata fields:
 
 | Variable | Type | Description |
 |---|---|---|
@@ -80,7 +79,7 @@ Parquet/DB row metadata fields:
 | `run_id` | `str` | Unique ingestion execution identifier for traceability. |
 | `source_endpoint` | `str` | Exchange endpoint group used to produce the row (`public_market_data` currently). |
 | `timeframe` | `str` | Storage timeframe field (same semantic meaning as `interval`). |
-| `open`, `high`, `low`, `close` | `float` | Database/parquet OHLC aliases mapped from candle prices. |
+| `open`, `high`, `low`, `close` | `float` | Parquet OHLC aliases mapped from candle prices. |
 | `extra` | `json/object` | Full normalized candle payload snapshot for reproducibility/debugging. |
 
 ### 5.2 Market Types
@@ -162,40 +161,40 @@ Portable CLI recommendation:
 
 ## 6. Execution Workflow
 
-Load latest BTC/ETH spot candles:
+Load BTC/ETH spot candles:
 
 ```bash
-python3 main.py loader --exchange binance --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --limit 5
+python3 main.py loader --exchange binance --market spot --symbols BTCUSDT ETHUSDT --timeframe H1
 ```
 
 Load spot and perp in one run:
 
 ```bash
-python3 main.py loader --exchanges binance deribit --market spot perp --symbols BTCUSDT ETHUSDT --timeframe M1 --limit 10
+python3 main.py loader --exchanges binance deribit --market spot perp --symbols BTCUSDT ETHUSDT --timeframe M1
 ```
 
 Load multiple exchanges in one run:
 
 ```bash
-python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M1 --limit 10
+python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M1
 ```
 
 Load multiple timeframes in one run (executed sequentially across exchange/market/symbol/timeframe):
 
 ```bash
-python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframes M1 M5 H1 --limit 120 --no-json-output
+python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframes M1 M5 H1 --no-json-output
 ```
 
 Load and generate plots (price + volume) under `plots/`:
 
 ```bash
-python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M5 --limit 200 --plot --plot-dir plots --plot-price close
+python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M5 --plot --plot-dir plots --plot-price close
 ```
 
 Save loaded data to parquet lake format:
 
 ```bash
-python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --limit 1200 --save-parquet-lake --lake-root lake/bronze
+python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --save-parquet-lake --lake-root lake/bronze
 ```
 
 Parquet lake write mode uses a stable file per partition (`data.parquet`) with staged merge+rewrite on each run to keep file counts bounded. Partition schema:
@@ -210,69 +209,50 @@ dataset_type=ohlcv/
     data.parquet
 ```
 
-Load all available history from exchanges (can be long-running):
+Loader mode is automatic:
+- If no parquet data exists for a symbol/timeframe, it fetches full available exchange history.
+- If parquet data exists, it performs gap-fill (internal gaps + tail to latest closed candle).
+
+Example full-history bootstrap (first run can be long-running):
 
 ```bash
-python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M1 --all-history --save-parquet-lake --lake-root lake/bronze --no-json-output
+python3 main.py loader --exchanges binance deribit --market spot --symbols BTCUSDT ETHUSDT --timeframe M1 --save-parquet-lake --lake-root lake/bronze --no-json-output
 ```
 
 Note: network fetch tasks are currently sequential. Parquet partition writes are parallelized.
 
-Run gap-fill mode (default when `--limit` is omitted): detects and fills all missing candles within stored history and also backfills from latest stored candle to current closed candle.
-
-```bash
-python3 main.py loader --exchange binance --market spot --symbols BTCUSDT ETHUSDT --timeframe H1 --save-parquet-lake --lake-root lake/bronze
-```
-
-If no parquet data exists and `--limit` is omitted, the script bootstraps with the maximum single-request amount supported by the exchange/timeframe.
-
-Use explicit latest mode without a fixed count:
-
-```bash
-python3 main.py loader --exchange deribit --market perp --symbols BTC ETH --timeframe M5 --mode latest
-```
-
 Run silently without JSON output:
 
 ```bash
-python3 main.py loader --exchange binance --market spot --symbols BTCUSDT --timeframe M1 --limit 100 --no-json-output
+python3 main.py loader --exchange binance --market spot --symbols BTCUSDT --timeframe M1 --no-json-output
 ```
 
-Ingest parquet lake files into TimescaleDB:
+Export combined spot/perp dataset from parquet lake as a dataframe file:
 
 ```bash
-export TIMESCALEDB_HOST=10.10.10.10
-export TIMESCALEDB_PORT=54321
-export TIMESCALEDB_USER=crypto
-export TIMESCALEDB_PASSWORD=change_me
-export TIMESCALEDB_DB=crypto
-python3 main.py ingest-parquet-to-db --lake-root lake/bronze --dataset-types ohlcv --batch-size 2000
+python3 main.py export-df --lake-root lake/bronze --format parquet --output exports --instrument-types spot perp --exchanges binance deribit --timeframes 1m
 ```
 
-The loader reads TimescaleDB settings from root `.env` by default (`TIMESCALEDB_*`, `PGSSLMODE`). Exported environment variables override `.env` values.
+Export writes one file per `exchange_symbol_timeframe`.
+Each file contains both `spot` and `perp` rows for that group (if available in lake data).
+For each exported dataframe file, a matching full plot (`spot` price + volume) is also saved
+with the same base name and `.png` extension.
+If `--output` is omitted, files are written to current directory.
 
-Export combined spot/perp dataset from DB as a dataframe file:
-
-```bash
-python3 main.py export-combined-df --format parquet --output exports/combined_spot_perp.parquet --instrument-types spot perp --exchanges binance deribit --timeframes 1m
-```
+Examples:
+- `binance_BTCUSDT_1m_full.csv`
+- `deribit_ETHUSDT_5m_full.parquet`
 
 CSV export variant:
 
 ```bash
-python3 main.py export-combined-df --format csv --output exports/combined_spot_perp.csv --start-time 2026-01-01T00:00:00Z --end-time 2026-12-31T23:59:59Z
-```
-
-Load more than 1000 candles (automatic pagination):
-
-```bash
-python3 main.py loader --exchange binance --market spot --symbols BTCUSDT --timeframe M1 --limit 1200
+python3 main.py export-df --lake-root lake/bronze --format csv --output exports --start-time 2026-01-01T00:00:00Z --end-time 2026-12-31T23:59:59Z
 ```
 
 Load Binance + Deribit perpetual candles (portable perp inputs):
 
 ```bash
-python3 main.py loader --exchanges binance deribit --market perp --symbols BTC ETH --timeframe M5 --limit 50
+python3 main.py loader --exchanges binance deribit --market perp --symbols BTC ETH --timeframe M5
 ```
 
 List all currently supported spot timeframes:
@@ -325,50 +305,19 @@ Equivalent direct commands:
 ## 9. Deployment Instructions
 
 - For now this is a local CLI tool.
-- Next stage will add scheduled runs and database persistence.
+- Next stage will add scheduled runs and orchestrated pipelines.
 - The CLI enforces a single running instance using `.run/crypto-l2-loader.lock`.
 - Runtime logs are written to `/volume1/Temp/logs/crypto-l2-loader.log` by default.
 - Logs rotate every 7 days and rotated files are date-suffixed (for example `crypto-l2-loader.log.2026-04-27`) and retained in the same directory.
 - Optional override: set `L2_SYNC_LOG_DIR` to change the log directory.
 
-### 9.1 TimescaleDB via Docker Compose
-
-1. Copy environment template:
-
-```bash
-cp docker/.env.example docker/.env
-```
-
-2. Start TimescaleDB:
-
-```bash
-docker compose -f docker/docker-compose.timescaledb.yml --env-file docker/.env up -d
-```
-
-3. Check service health:
-
-```bash
-docker compose -f docker/docker-compose.timescaledb.yml ps
-```
-
-4. Stop service:
-
-```bash
-docker compose -f docker/docker-compose.timescaledb.yml down
-```
-
-Notes:
-- Data persists in named volume `timescaledb_data`.
-- `infra/db/init/001_enable_timescaledb.sql` auto-runs on first initialization.
-
 ## 10. Known Limitations
 
 - Step 1 currently supports candles only (no funding or L2 yet).
-- No database persistence yet.
 - No exchange failover yet.
 
 ## 11. Future Improvements
 
 - Add perpetual and funding endpoints.
 - Add Deribit adapter for L2 order book snapshots.
-- Add full-update vs last-N-days database ingestion mode.
+- Add scheduled lake compaction and retention policies.

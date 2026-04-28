@@ -111,6 +111,8 @@ Always ignore and keep untracked:
 - `.ruff_cache/`
 - `.cache/`
 - `.ipynb_checkpoints/`
+- `.env`
+- `.env.*` (except `.env.example`)
 
 If any of these paths are accidentally tracked, agents must remove them from git tracking using cached removal (keep local files), then confirm `.gitignore` contains the proper exclusions.
 
@@ -157,6 +159,8 @@ Examples:
 - Never expose API keys
 - Use environment variables
 - Use `.env.example`
+- Never place `export KEY=VALUE` blocks in `README.md` or `REPORT.md`.
+- Put runtime environment variables in the default local config file (for example `.env`), and ensure that file is excluded from git tracking.
 - Sensitive information (passwords, tokens, private keys, connection strings) must be stored only in local config files or environment files that are excluded from git tracking.
 - Local config files that may contain sensitive values must always be listed in `.gitignore` and must never be committed.
 
@@ -178,7 +182,7 @@ It must always include:
 - deployment instructions
 - known limitations
 - future improvements
-- architecture and storage tradeoff decisions with rationale (for example why Parquet, why TimescaleDB, and alternatives considered)
+- architecture and storage tradeoff decisions with rationale (for example why Parquet/object storage and alternatives considered)
 
 Use nested sections.
 
@@ -187,7 +191,7 @@ Use ASCII diagrams where helpful.
 Example:
 
 ```text
-PDF -> Parser -> Chunker -> Embeddings -> Vector DB -> Retrieval -> LLM
+PDF -> Parser -> Chunker -> Embeddings -> Vector Store -> Retrieval -> LLM
 ```
 
 README must always remain updated after major architectural changes.
