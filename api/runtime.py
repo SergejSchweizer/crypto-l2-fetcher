@@ -94,7 +94,14 @@ class SingleInstanceError(RuntimeError):
 
 
 class SingleInstanceLock:
-    """Non-blocking process lock backed by a lock file."""
+    """Non-blocking process lock backed by a lock file.
+
+    Example:
+        ```python
+        with SingleInstanceLock(".run/crypto-l2-loader-l2.lock"):
+            run_loader()
+        ```
+    """
 
     def __init__(self, lock_path: str) -> None:
         self.lock_path = Path(lock_path)

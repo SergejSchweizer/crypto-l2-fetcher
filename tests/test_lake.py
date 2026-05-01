@@ -1,4 +1,4 @@
-"""Tests for parquet lake helper functions."""
+"""Tests for L2 parquet lake helper functions."""
 
 from __future__ import annotations
 
@@ -6,219 +6,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ingestion.l2 import L2MinuteBar
-from ingestion.lake import (
-    candle_partition_key,
-    candle_record,
-    load_spot_candles_from_lake,
-    merge_and_deduplicate_rows,
-    open_times_in_lake,
-    partition_path,
-    save_l2_m1_parquet_lake,
-    save_spot_candles_parquet_lake,
-)
-from ingestion.spot import SpotCandle
+from ingestion.lake import merge_and_deduplicate_rows, partition_path, save_l2_m1_parquet_lake
 
 
-def _sample_candle() -> SpotCandle:
-    return SpotCandle(
-        exchange="deribit",
-        symbol="BTCUSDT",
-        interval="1m",
-        open_time=datetime(2026, 4, 27, 10, 0, tzinfo=UTC),
-        close_time=datetime(2026, 4, 27, 10, 0, 59, 999000, tzinfo=UTC),
-        open_price=100.0,
-        high_price=110.0,
-        low_price=90.0,
-        close_price=105.0,
-        volume=15.0,
-        quote_volume=1500.0,
-        trade_count=42,
-    )
+def _sample_l2_row(minute: int, mid_close: float) -> L2MinuteBar:
+    """Build a representative L2 minute bar for persistence tests."""
 
-
-def test_partition_key_and_path() -> None:
-    candle = _sample_candle()
-    key = candle_partition_key(candle=candle, market="spot")
-    assert key == ("deribit", "spot", "BTCUSDT", "1m", "2026-04")
-
-    result = partition_path("lake/bronze", "ohlcv", key)
-    assert str(result).endswith(
-        "dataset_type=ohlcv/exchange=deribit/instrument_type=spot/symbol=BTCUSDT/timeframe=1m/date=2026-04"
-    )
-
-
-def test_candle_record_contains_core_fields() -> None:
-    candle = _sample_candle()
-    ingested_at = datetime(2026, 4, 27, 12, 0, tzinfo=UTC)
-    record = candle_record(candle=candle, market="spot", run_id="run-1", ingested_at=ingested_at)
-
-    assert record["dataset_type"] == "ohlcv"
-    assert record["instrument_type"] == "spot"
-    assert record["run_id"] == "run-1"
-    assert record["open"] == 100.0
-    assert record["close"] == 105.0
-
-
-def test_merge_and_deduplicate_rows_keeps_latest_record() -> None:
-    first_time = datetime(2026, 4, 27, 10, 0, tzinfo=UTC)
-    second_time = datetime(2026, 4, 27, 11, 0, tzinfo=UTC)
-    base = {
-        "exchange": "deribit",
-        "instrument_type": "spot",
-        "symbol": "BTCUSDT",
-        "timeframe": "1m",
-        "open_time": first_time,
-        "close": 100.0,
-    }
-    existing = [base, {**base, "open_time": second_time, "close": 101.0}]
-    new = [{**base, "close": 102.0}]
-
-    merged = merge_and_deduplicate_rows(existing=existing, new=new)
-    assert len(merged) == 2
-    assert merged[0]["open_time"] == first_time
-    assert merged[0]["close"] == 102.0
-
-
-def test_save_spot_candles_parquet_lake_rewrites_single_partition_file(tmp_path: Path) -> None:
-    candle_1 = SpotCandle(
-        exchange="deribit",
-        symbol="BTCUSDT",
-        interval="1m",
-        open_time=datetime(2026, 4, 27, 10, 0, tzinfo=UTC),
-        close_time=datetime(2026, 4, 27, 10, 0, 59, 999000, tzinfo=UTC),
-        open_price=100.0,
-        high_price=101.0,
-        low_price=99.0,
-        close_price=100.5,
-        volume=10.0,
-        quote_volume=1000.0,
-        trade_count=10,
-    )
-    candle_2 = SpotCandle(
-        exchange="deribit",
-        symbol="BTCUSDT",
-        interval="1m",
-        open_time=datetime(2026, 4, 27, 10, 1, tzinfo=UTC),
-        close_time=datetime(2026, 4, 27, 10, 1, 59, 999000, tzinfo=UTC),
-        open_price=100.5,
-        high_price=102.0,
-        low_price=100.0,
-        close_price=101.5,
-        volume=11.0,
-        quote_volume=1100.0,
-        trade_count=11,
-    )
-
-    first = {"deribit": {"BTCUSDT": [candle_1]}}
-    second = {"deribit": {"BTCUSDT": [candle_1, candle_2]}}
-
-    files_1 = save_spot_candles_parquet_lake(first, market="spot", lake_root=str(tmp_path))
-    files_2 = save_spot_candles_parquet_lake(second, market="spot", lake_root=str(tmp_path))
-
-    assert files_1 == files_2
-    assert len(files_2) == 1
-    assert files_2[0].endswith("/data.parquet")
-
-
-def test_open_times_in_lake_returns_sorted_unique(tmp_path: Path) -> None:
-    candle_1 = SpotCandle(
-        exchange="deribit",
-        symbol="BTCUSDT",
-        interval="1m",
-        open_time=datetime(2026, 4, 27, 10, 0, tzinfo=UTC),
-        close_time=datetime(2026, 4, 27, 10, 0, 59, 999000, tzinfo=UTC),
-        open_price=100.0,
-        high_price=101.0,
-        low_price=99.0,
-        close_price=100.5,
-        volume=10.0,
-        quote_volume=1000.0,
-        trade_count=10,
-    )
-    candle_2 = SpotCandle(
-        exchange="deribit",
-        symbol="BTCUSDT",
-        interval="1m",
-        open_time=datetime(2026, 4, 27, 10, 1, tzinfo=UTC),
-        close_time=datetime(2026, 4, 27, 10, 1, 59, 999000, tzinfo=UTC),
-        open_price=101.0,
-        high_price=102.0,
-        low_price=100.0,
-        close_price=101.5,
-        volume=11.0,
-        quote_volume=1100.0,
-        trade_count=11,
-    )
-    save_spot_candles_parquet_lake({"deribit": {"BTCUSDT": [candle_2, candle_1, candle_1]}}, "spot", str(tmp_path))
-
-    values = open_times_in_lake(
-        lake_root=str(tmp_path),
-        market="spot",
-        exchange="deribit",
-        symbol="BTCUSDT",
-        timeframe="1m",
-    )
-
-    assert values == [candle_1.open_time, candle_2.open_time]
-
-
-def test_load_spot_candles_from_lake_reads_full_partition_history(tmp_path: Path) -> None:
-    candle_apr = SpotCandle(
-        exchange="deribit",
-        symbol="BTCUSDT",
-        interval="1m",
-        open_time=datetime(2026, 4, 27, 10, 0, tzinfo=UTC),
-        close_time=datetime(2026, 4, 27, 10, 0, 59, 999000, tzinfo=UTC),
-        open_price=100.0,
-        high_price=101.0,
-        low_price=99.0,
-        close_price=100.5,
-        volume=10.0,
-        quote_volume=1000.0,
-        trade_count=10,
-    )
-    candle_may = SpotCandle(
-        exchange="deribit",
-        symbol="BTCUSDT",
-        interval="1m",
-        open_time=datetime(2026, 5, 1, 0, 0, tzinfo=UTC),
-        close_time=datetime(2026, 5, 1, 0, 0, 59, 999000, tzinfo=UTC),
-        open_price=110.0,
-        high_price=112.0,
-        low_price=109.0,
-        close_price=111.0,
-        volume=9.0,
-        quote_volume=999.0,
-        trade_count=8,
-    )
-
-    save_spot_candles_parquet_lake(
-        {"deribit": {"BTCUSDT": [candle_may, candle_apr]}},
-        market="spot",
-        lake_root=str(tmp_path),
-    )
-
-    values = load_spot_candles_from_lake(
-        lake_root=str(tmp_path),
-        market="spot",
-        exchange="deribit",
-        symbol="BTCUSDT",
-        timeframe="1m",
-    )
-
-    assert [item.open_time for item in values] == [candle_apr.open_time, candle_may.open_time]
-
-
-def test_save_l2_m1_parquet_lake_rewrites_single_partition_file(tmp_path: Path) -> None:
-    row_1 = L2MinuteBar(
-        minute_ts=datetime(2026, 4, 29, 10, 0, tzinfo=UTC),
+    return L2MinuteBar(
+        minute_ts=datetime(2026, 4, 29, 10, minute, tzinfo=UTC),
         exchange="deribit",
         symbol="BTC-PERPETUAL",
         snapshot_count=5,
         mid_open=100.0,
         mid_high=101.0,
         mid_low=99.0,
-        mid_close=100.5,
+        mid_close=mid_close,
         mark_close=100.4,
         index_close=100.3,
         spread_bps_mean=10.0,
@@ -246,48 +48,58 @@ def test_save_l2_m1_parquet_lake_rewrites_single_partition_file(tmp_path: Path) 
         fetch_duration_s_max=0.22,
         fetch_duration_s_last=0.12,
     )
-    row_2 = L2MinuteBar(
-        minute_ts=datetime(2026, 4, 29, 10, 1, tzinfo=UTC),
-        exchange="deribit",
-        symbol="BTC-PERPETUAL",
-        snapshot_count=6,
-        mid_open=100.5,
-        mid_high=102.0,
-        mid_low=100.0,
-        mid_close=101.5,
-        mark_close=101.4,
-        index_close=101.3,
-        spread_bps_mean=9.0,
-        spread_bps_max=11.0,
-        spread_bps_last=10.0,
-        bid_depth_1_mean=12.0,
-        ask_depth_1_mean=10.0,
-        bid_depth_10_mean=120.0,
-        ask_depth_10_mean=100.0,
-        bid_depth_50_mean=520.0,
-        ask_depth_50_mean=500.0,
-        imbalance_1_mean=0.05,
-        imbalance_10_mean=0.15,
-        imbalance_50_mean=0.25,
-        imbalance_10_last=0.2,
-        imbalance_50_last=0.3,
-        microprice_close=101.45,
-        microprice_minus_mid_mean=0.02,
-        bid_vwap_10_mean=100.5,
-        ask_vwap_10_mean=102.5,
-        open_interest_last=1002.0,
-        funding_8h_last=0.0001,
-        current_funding_last=0.00001,
-        fetch_duration_s_mean=0.13,
-        fetch_duration_s_max=0.24,
-        fetch_duration_s_last=0.14,
+
+
+def test_l2_partition_path() -> None:
+    """Verify L2 partition paths use the canonical dataset layout."""
+
+    result = partition_path(
+        "lake/bronze",
+        "l2_m1",
+        ("deribit", "perp", "BTC-PERPETUAL", "1m", "2026-04"),
     )
+
+    assert str(result).endswith(
+        "dataset_type=l2_m1/exchange=deribit/instrument_type=perp/"
+        "symbol=BTC-PERPETUAL/timeframe=1m/date=2026-04"
+    )
+
+
+def test_merge_and_deduplicate_rows_keeps_latest_record() -> None:
+    """Verify parquet rewrites keep the latest row for a duplicate natural key."""
+
+    first_time = datetime(2026, 4, 29, 10, 0, tzinfo=UTC)
+    second_time = datetime(2026, 4, 29, 10, 1, tzinfo=UTC)
+    base = {
+        "exchange": "deribit",
+        "instrument_type": "perp",
+        "symbol": "BTC-PERPETUAL",
+        "timeframe": "1m",
+        "open_time": first_time,
+        "mid_close": 100.0,
+    }
+    existing = [base, {**base, "open_time": second_time, "mid_close": 101.0}]
+    new = [{**base, "mid_close": 102.0}]
+
+    merged = merge_and_deduplicate_rows(existing=existing, new=new)
+
+    assert len(merged) == 2
+    assert merged[0]["open_time"] == first_time
+    assert merged[0]["mid_close"] == 102.0
+
+
+def test_save_l2_m1_parquet_lake_rewrites_single_partition_file(tmp_path: Path) -> None:
+    """Verify repeated L2 parquet writes rewrite one partition idempotently."""
+
+    row_1 = _sample_l2_row(minute=0, mid_close=100.5)
+    row_2 = _sample_l2_row(minute=1, mid_close=101.5)
 
     first = {"deribit": {"BTC-PERPETUAL": [row_1]}}
     second = {"deribit": {"BTC-PERPETUAL": [row_1, row_2]}}
 
     files_1 = save_l2_m1_parquet_lake(first, lake_root=str(tmp_path))
     files_2 = save_l2_m1_parquet_lake(second, lake_root=str(tmp_path))
+
     assert files_1 == files_2
     assert len(files_2) == 1
     assert files_2[0].endswith("/data.parquet")

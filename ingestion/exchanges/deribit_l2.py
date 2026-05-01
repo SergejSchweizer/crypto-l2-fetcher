@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any, cast
 
 from ingestion.http_client import get_json
-from ingestion.spot import normalize_storage_symbol
 
 DERIBIT_ORDER_BOOK_URL = "https://www.deribit.com/api/v2/public/get_order_book"
 
@@ -24,7 +23,7 @@ def fetch_order_book_snapshot(symbol: str, depth: int = 50) -> dict[str, object]
     if depth <= 0:
         raise ValueError("depth must be positive")
 
-    instrument_name = normalize_storage_symbol(exchange="deribit", symbol=symbol, market="perp")
+    instrument_name = normalize_l2_symbol(symbol)
     payload = get_json(
         DERIBIT_ORDER_BOOK_URL,
         params={"instrument_name": instrument_name, "depth": depth},
@@ -69,6 +68,25 @@ def _normalize_level(level: object) -> tuple[float, float]:
     price = float(cast(Any, level[0]))
     amount = float(cast(Any, level[1]))
     return (price, amount)
+
+
+def normalize_l2_symbol(symbol: str) -> str:
+    """Normalize a Deribit perpetual symbol alias to an instrument name."""
+
+    value = symbol.strip().upper().replace("/", "").replace("_", "-")
+    if not value:
+        raise ValueError("symbol must not be empty")
+    if value.endswith("-PERPETUAL"):
+        return value
+    if value.endswith("PERPETUAL") and "-" not in value:
+        return f"{value.removesuffix('PERPETUAL')}-PERPETUAL"
+    if "-" in value:
+        return value
+    if value.endswith("USDT"):
+        return f"{value.removesuffix('USDT')}-PERPETUAL"
+    if value.endswith("USD"):
+        return f"{value.removesuffix('USD')}-PERPETUAL"
+    return f"{value}-PERPETUAL"
 
 
 def _to_optional_float(value: object) -> float | None:

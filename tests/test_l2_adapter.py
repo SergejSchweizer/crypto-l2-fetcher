@@ -34,3 +34,19 @@ def test_fetch_order_book_snapshot_normalizes_payload(monkeypatch: pytest.Monkey
     assert snapshot["bids"] == [(100.0, 2.0), (99.9, 1.0)]
     assert snapshot["asks"] == [(100.1, 3.0), (100.2, 1.5)]
     assert snapshot["open_interest"] == 1234.0
+
+
+@pytest.mark.parametrize(
+    ("raw_symbol", "expected"),
+    [
+        ("BTC", "BTC-PERPETUAL"),
+        ("btcusdt", "BTC-PERPETUAL"),
+        ("BTCUSD", "BTC-PERPETUAL"),
+        ("BTC-PERPETUAL", "BTC-PERPETUAL"),
+        ("BTC_PERPETUAL", "BTC-PERPETUAL"),
+    ],
+)
+def test_normalize_l2_symbol_accepts_common_aliases(raw_symbol: str, expected: str) -> None:
+    """Verify common Deribit perpetual aliases normalize consistently."""
+
+    assert deribit_l2.normalize_l2_symbol(raw_symbol) == expected
