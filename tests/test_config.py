@@ -15,8 +15,6 @@ def test_load_config_reads_yaml_defaults(tmp_path: Path) -> None:
         """
 http:
   timeout_s: 30
-runtime:
-  log_backup_count: 3
 ingestion:
   symbols: [BTC, SOL]
   snapshot_count: 6

@@ -19,7 +19,7 @@ DEFAULT_CONFIG: Config = {
     "runtime": {
         "log_dir": ".logs",
         "log_rotation_days": 7,
-        "log_backup_count": 0,
+        "log_backup_count": 3,
     },
     "ingestion": {
         "exchange": "deribit",

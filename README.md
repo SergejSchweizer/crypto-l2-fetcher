@@ -842,7 +842,9 @@ Upsert-based datasets merge by natural keys and deterministic sort order:
   - `job_event command=<command> event=run_summary ...`
 - `--debug` emits request scope, source mappings, raw row counts, normalized row counts, persistence
   paths, and collector-specific timing or window parameters where applicable.
-- Log rotation is controlled by `runtime.log_rotation_days` and `runtime.log_backup_count`.
+- Each active module logfile is rotated every seven days into a dated `.zip` evidence archive.
+- The latest three weekly ZIP archives are retained per module; older archives are deleted during
+  rollover. The policy is controlled by `runtime.log_rotation_days` and `runtime.log_backup_count`.
 
 ## 8.3 Bronze Disk Retention
 
