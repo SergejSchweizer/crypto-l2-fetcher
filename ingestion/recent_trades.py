@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+
+from ingestion import normalization as _normalization
+from ingestion.normalization import (
+    raw_payload_hash as _raw_payload_hash,
+)
+from ingestion.normalization import (
+    timestamp_ms_to_datetime as _timestamp_ms_to_datetime,
+)
+from ingestion.normalization import (
+    to_optional_float as _to_optional_float,
+)
+from ingestion.normalization import (
+    to_optional_int as _to_optional_int,
+)
+from ingestion.normalization import (
+    to_optional_str as _to_optional_str,
+)
 
 RECENT_TRADE_DATASET_TYPE = "recent_trade_snapshot_1m"
 RECENT_TRADE_SCHEMA_VERSION = "v1"
 RECENT_TRADE_SOURCE = "rest_get_last_trades_by_currency"
+snapshot_time_floor_minute = _normalization.snapshot_time_floor_minute
+utc_run_id = _normalization.utc_run_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,20 +61,6 @@ class RecentTradeSnapshotRow:
     signed_amount: float | None
     notional: float | None
     raw_payload_hash: str
-
-
-def utc_run_id() -> str:
-    """Create a UTC run identifier for recent trade Bronze writes."""
-
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-
-
-def snapshot_time_floor_minute(now: datetime | None = None) -> datetime:
-    """Return a UTC snapshot timestamp floored to minute."""
-
-    base = now or datetime.now(UTC)
-    utc_base = base.astimezone(UTC)
-    return utc_base.replace(second=0, microsecond=0)
 
 
 def overlap_start_timestamp_ms(snapshot_time: datetime, lookback_seconds: int) -> int:
@@ -215,32 +217,3 @@ def _notional(price: float | None, amount: float | None) -> float | None:
     if price is None or amount is None:
         return None
     return price * amount
-
-
-def _timestamp_ms_to_datetime(value: object) -> datetime | None:
-    if value is None or not isinstance(value, int | float):
-        return None
-    return datetime.fromtimestamp(float(value) / 1000.0, tz=UTC)
-
-
-def _to_optional_float(value: object) -> float | None:
-    if value is None:
-        return None
-    return float(str(value))
-
-
-def _to_optional_int(value: object) -> int | None:
-    if value is None:
-        return None
-    return int(str(value))
-
-
-def _to_optional_str(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-def _raw_payload_hash(row: Mapping[str, object]) -> str:
-    encoded = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
