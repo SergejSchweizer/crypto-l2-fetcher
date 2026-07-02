@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from pathlib import Path
+from typing import cast
 
 from ingestion.instrument_metadata import InstrumentMetadataSnapshotRow
-from ingestion.parquet_repository import ParquetUpsertRepository
+from ingestion.lake_writer import upsert_partitioned_records
 
 InstrumentMetadataPartitionKey = tuple[str, str, str, str, str, str]
 InstrumentMetadataNaturalKey = tuple[str, str, str]
@@ -73,31 +73,27 @@ def save_instrument_metadata_snapshot_parquet_lake(
     lake_root: str,
 ) -> list[str]:
     """Persist instrument metadata rows as idempotent hourly bronze parquet files."""
-    repository = ParquetUpsertRepository()
 
-    grouped: defaultdict[InstrumentMetadataPartitionKey, list[dict[str, object]]] = defaultdict(list)
-    for rows in rows_by_date.values():
-        for row in rows:
-            key: InstrumentMetadataPartitionKey = (
-                row.dataset_type,
-                row.exchange,
-                row.snapshot_date.strftime("%Y"),
-                row.snapshot_date.strftime("%m"),
-                row.snapshot_date.strftime("%d"),
-                "00",
-            )
-            grouped[key].append(instrument_metadata_snapshot_record(row))
-
-    written_files: list[str] = []
-    for key, records in grouped.items():
-        part_dir = instrument_metadata_partition_path(lake_root=lake_root, key=key)
-        file_path = part_dir / "data.parquet"
-        written_files.append(
-            repository.upsert(
-                file_path=file_path,
-                records=records,
-                natural_key=lambda item: _natural_key(item),
-                sort_key=lambda item: str(item["instrument_name"]),
-            )
+    def partition_key(row: InstrumentMetadataSnapshotRow) -> InstrumentMetadataPartitionKey:
+        return (
+            row.dataset_type,
+            row.exchange,
+            row.snapshot_date.strftime("%Y"),
+            row.snapshot_date.strftime("%m"),
+            row.snapshot_date.strftime("%d"),
+            "00",
         )
-    return sorted(written_files)
+
+    return upsert_partitioned_records(
+        rows=(row for rows in rows_by_date.values() for row in rows),
+        lake_root=lake_root,
+        partition_key=partition_key,
+        partition_path=lambda root, key: instrument_metadata_partition_path(
+            lake_root=root,
+            key=cast(InstrumentMetadataPartitionKey, key),
+        ),
+        record_builder=instrument_metadata_snapshot_record,
+        natural_key=_natural_key,
+        sort_key=lambda item: str(item["instrument_name"]),
+        staging_name=lambda _records: ".staging-data.parquet",
+    )

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
+from ingestion.lake_writer import upsert_partitioned_records
 from ingestion.option_instrument_ticker import OptionInstrumentTickerSnapshotRow
-from ingestion.parquet_repository import ParquetUpsertRepository
 
 OptionInstrumentTickerPartitionKey = tuple[str, str, str, str, str, str, str, str, str, str]
 OptionInstrumentTickerNaturalKey = tuple[str, str, str, datetime]
@@ -118,10 +118,8 @@ def save_option_instrument_ticker_snapshot_parquet_lake(
 ) -> list[str]:
     """Upsert per-instrument option ticker rows into hourly Bronze parquet files."""
 
-    repository = ParquetUpsertRepository()
-    grouped: defaultdict[OptionInstrumentTickerPartitionKey, list[dict[str, object]]] = defaultdict(list)
-    for row in rows:
-        key: OptionInstrumentTickerPartitionKey = (
+    def partition_key(row: OptionInstrumentTickerSnapshotRow) -> OptionInstrumentTickerPartitionKey:
+        return (
             row.dataset_type,
             row.exchange,
             row.instrument_type,
@@ -133,18 +131,17 @@ def save_option_instrument_ticker_snapshot_parquet_lake(
             row.snapshot_time.strftime("%d"),
             row.snapshot_time.strftime("%H"),
         )
-        grouped[key].append(option_instrument_ticker_snapshot_record(row))
 
-    written_files: list[str] = []
-    for key, records in grouped.items():
-        file_path = option_instrument_ticker_partition_path(lake_root=lake_root, key=key) / "data.parquet"
-        written_files.append(
-            repository.upsert(
-                file_path=file_path,
-                records=records,
-                natural_key=lambda item: _natural_key(item),
-                sort_key=lambda item: _sort_key(item),
-                staging_name=f".staging-{records[0]['run_id']}.parquet",
-            )
-        )
-    return sorted(written_files)
+    return upsert_partitioned_records(
+        rows=rows,
+        lake_root=lake_root,
+        partition_key=partition_key,
+        partition_path=lambda root, key: option_instrument_ticker_partition_path(
+            lake_root=root,
+            key=cast(OptionInstrumentTickerPartitionKey, key),
+        ),
+        record_builder=option_instrument_ticker_snapshot_record,
+        natural_key=_natural_key,
+        sort_key=_sort_key,
+        staging_name=lambda records: f".staging-{records[0]['run_id']}.parquet",
+    )
