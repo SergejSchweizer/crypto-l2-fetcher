@@ -7,7 +7,9 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-FUTURES_SUMMARY_DATASET_TYPE = "futures_summary_snapshot_1m"
+from domain.datasets import FUTURES_SUMMARY_SNAPSHOT_1M
+
+FUTURES_SUMMARY_DATASET_TYPE = FUTURES_SUMMARY_SNAPSHOT_1M.dataset_type
 FUTURES_SUMMARY_SCHEMA_VERSION = "v1"
 FUTURES_SUMMARY_SOURCE = "rest_get_book_summary_by_currency"
 

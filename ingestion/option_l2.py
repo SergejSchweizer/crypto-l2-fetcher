@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import cast
 
+from domain.datasets import OPTIONS_L2_SNAPSHOT_1M
 from ingestion import normalization as _normalization
 from ingestion.normalization import (
     looks_like_option_instrument as _looks_like_option_instrument,
@@ -26,7 +27,7 @@ from ingestion.normalization import (
     to_optional_str as _to_optional_str,
 )
 
-OPTION_L2_DATASET_TYPE = "options_l2_snapshot_1m"
+OPTION_L2_DATASET_TYPE = OPTIONS_L2_SNAPSHOT_1M.dataset_type
 OPTION_L2_SCHEMA_VERSION = "v1"
 OPTION_L2_SOURCE = "rest_order_book"
 snapshot_time_floor_minute = _normalization.snapshot_time_floor_minute

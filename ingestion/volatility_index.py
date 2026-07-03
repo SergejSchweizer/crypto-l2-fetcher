@@ -7,7 +7,9 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-VOLATILITY_INDEX_DATASET_TYPE = "volatility_index_snapshot_1m"
+from domain.datasets import VOLATILITY_INDEX_SNAPSHOT_1M
+
+VOLATILITY_INDEX_DATASET_TYPE = VOLATILITY_INDEX_SNAPSHOT_1M.dataset_type
 VOLATILITY_INDEX_SCHEMA_VERSION = "v1"
 VOLATILITY_INDEX_SOURCE = "rest_get_volatility_index_data"
 

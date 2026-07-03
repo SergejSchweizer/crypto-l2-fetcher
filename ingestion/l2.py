@@ -9,12 +9,13 @@ from datetime import UTC, datetime
 from time import monotonic
 
 from domain.contracts import SourceAdapter
+from domain.datasets import PERPS_L2_SNAPSHOT_1M
 from domain.models import RawSnapshot
 from sources.registry import source_adapter_for_exchange
 
 LOGGER = logging.getLogger(__name__)
 
-PERPS_L2_DATASET_TYPE = "perps_l2_snapshot_1m"
+PERPS_L2_DATASET_TYPE = PERPS_L2_SNAPSHOT_1M.dataset_type
 
 
 @dataclass(frozen=True)

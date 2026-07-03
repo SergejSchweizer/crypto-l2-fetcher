@@ -838,6 +838,9 @@ Upsert-based datasets merge by natural keys and deterministic sort order:
   - `volatility_index_snapshot_1m.log`
   - `futures_summary_snapshot_1m.log`
   - `recent_trade_snapshot_1m.log`
+- Dataset names, logfile stems, canonical sources, and semantic partition columns are registered in
+  `domain/datasets.py`. Add or rename datasets there first, then update command wiring, lake
+  writers, cron, and this README in the same change set.
 - Dataset lifecycle messages use a stable key-value envelope with `dataset_type` and `exchange`
   on every dataset event:
   - `job_event command=<command> event=dispatch ...`

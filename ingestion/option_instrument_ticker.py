@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import cast
 
+from domain.datasets import OPTION_INSTRUMENT_TICKER_SNAPSHOT_1M
 from ingestion import normalization as _normalization
 from ingestion.normalization import (
     looks_like_option_instrument as _looks_like_option_instrument,
@@ -26,7 +27,7 @@ from ingestion.normalization import (
     to_optional_str as _to_optional_str,
 )
 
-OPTION_INSTRUMENT_TICKER_DATASET_TYPE = "option_instrument_ticker_snapshot_1m"
+OPTION_INSTRUMENT_TICKER_DATASET_TYPE = OPTION_INSTRUMENT_TICKER_SNAPSHOT_1M.dataset_type
 OPTION_INSTRUMENT_TICKER_SCHEMA_VERSION = "v1"
 OPTION_INSTRUMENT_TICKER_SOURCE = "rest_ticker"
 snapshot_time_floor_minute = _normalization.snapshot_time_floor_minute
