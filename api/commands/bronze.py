@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import TypeAlias, cast
 
+from api.commands.runtime import (
+    DatasetCommandResult,
+    emit_dataset_command_result,
+)
+from api.commands.runtime import (
+    emit_json_output as _emit_json_output,
+)
+from api.commands.runtime import (
+    log_dataset_debug_event as _log_dataset_debug_event,
+)
+from api.commands.runtime import (
+    log_dataset_event as _log_dataset_event,
+)
+from api.commands.runtime import (
+    log_job_event as _log_job_event,
+)
 from api.constants import (
     BRONZE_BUILDER_COMMAND,
     FUTURES_SUMMARY_BRONZE_BUILDER_COMMAND,
@@ -230,88 +245,6 @@ def _normalize_cli_instruments(values: list[str]) -> list[str]:
     for value in values:
         instruments.extend(item.strip().upper() for item in value.replace(",", " ").split() if item.strip())
     return sorted(dict.fromkeys(instruments))
-
-
-def _emit_json_output(enabled: bool, payload: Mapping[str, object]) -> None:
-    """Print one JSON payload when output is enabled."""
-
-    if enabled:
-        print(json.dumps(payload, indent=2))
-
-
-def _log_value(value: object) -> str:
-    if value is None:
-        return "none"
-    if isinstance(value, bool):
-        return str(value).lower()
-    if isinstance(value, float):
-        return f"{value:.3f}"
-    if isinstance(value, Mapping):
-        return ",".join(f"{key}:{_log_value(item)}" for key, item in sorted(value.items()))
-    if isinstance(value, list | tuple | set):
-        return ",".join(str(item) for item in value)
-    return str(value)
-
-
-def _format_log_fields(fields: Mapping[str, object]) -> str:
-    return " ".join(f"{key}={_log_value(value)}" for key, value in sorted(fields.items()))
-
-
-def _log_job_event(
-    logger: logging.Logger,
-    level: int,
-    command: str,
-    event: str,
-    **fields: object,
-) -> None:
-    logger.log(level, "job_event command=%s event=%s %s", command, event, _format_log_fields(fields))
-
-
-def _log_dataset_event(
-    logger: logging.Logger,
-    level: int,
-    command: str,
-    event: str,
-    *,
-    dataset_type: str,
-    exchange: str = "deribit",
-    **fields: object,
-) -> None:
-    """Write one dataset-scoped lifecycle event with the shared log envelope."""
-
-    _log_job_event(
-        logger,
-        level,
-        command,
-        event,
-        dataset_type=dataset_type,
-        exchange=exchange,
-        **fields,
-    )
-
-
-def _log_dataset_debug_event(
-    logger: logging.Logger,
-    command: str,
-    event: str,
-    *,
-    dataset_type: str,
-    exchange: str = "deribit",
-    **fields: object,
-) -> None:
-    """Write an expressive dataset debug event only when DEBUG logging is enabled."""
-
-    if not logger.isEnabledFor(logging.DEBUG):
-        return
-    _log_dataset_event(
-        logger,
-        logging.DEBUG,
-        command,
-        event,
-        dataset_type=dataset_type,
-        exchange=exchange,
-        **fields,
-    )
 
 
 def _fetch_options_rows_for_currencies(
@@ -1403,21 +1336,24 @@ def _run_index_price_bronze_builder(args: argparse.Namespace, logger: logging.Lo
         "output_files": output_files,
         "errors": errors,
     }
-    _emit_json_output(bool(args.json_output), output)
-    _log_dataset_event(
+    emit_dataset_command_result(
         logger,
-        logging.INFO,
-        INDEX_PRICE_BRONZE_BUILDER_COMMAND,
-        "run_summary",
-        dataset_type=INDEX_PRICE_DATASET_TYPE,
-        elapsed_s=perf_counter() - started_at,
-        errors=len(errors),
-        files=len(output_files),
-        rows_written=output["rows_written"],
-        run_id=run_id,
-        snapshot_time=output["snapshot_time"],
-        status="complete" if not errors else "partial",
-        symbols=symbols,
+        DatasetCommandResult(
+            command=INDEX_PRICE_BRONZE_BUILDER_COMMAND,
+            dataset_type=INDEX_PRICE_DATASET_TYPE,
+            payload=output,
+            json_output=bool(args.json_output),
+            summary_fields={
+                "elapsed_s": perf_counter() - started_at,
+                "errors": len(errors),
+                "files": len(output_files),
+                "rows_written": output["rows_written"],
+                "run_id": run_id,
+                "snapshot_time": output["snapshot_time"],
+                "status": "complete" if not errors else "partial",
+                "symbols": symbols,
+            },
+        ),
     )
 
 
@@ -1536,22 +1472,25 @@ def _run_volatility_index_bronze_builder(args: argparse.Namespace, logger: loggi
         "output_files": output_files,
         "errors": errors,
     }
-    _emit_json_output(bool(args.json_output), output)
-    _log_dataset_event(
+    emit_dataset_command_result(
         logger,
-        logging.INFO,
-        VOLATILITY_INDEX_BRONZE_BUILDER_COMMAND,
-        "run_summary",
-        dataset_type=VOLATILITY_INDEX_DATASET_TYPE,
-        currencies=currencies,
-        elapsed_s=perf_counter() - started_at,
-        errors=len(errors),
-        files=len(output_files),
-        resolution=resolution,
-        rows_written=len(all_rows),
-        run_id=run_id,
-        snapshot_time=output["snapshot_time"],
-        status="complete" if not errors else "partial",
+        DatasetCommandResult(
+            command=VOLATILITY_INDEX_BRONZE_BUILDER_COMMAND,
+            dataset_type=VOLATILITY_INDEX_DATASET_TYPE,
+            payload=output,
+            json_output=bool(args.json_output),
+            summary_fields={
+                "currencies": currencies,
+                "elapsed_s": perf_counter() - started_at,
+                "errors": len(errors),
+                "files": len(output_files),
+                "resolution": resolution,
+                "rows_written": len(all_rows),
+                "run_id": run_id,
+                "snapshot_time": output["snapshot_time"],
+                "status": "complete" if not errors else "partial",
+            },
+        ),
     )
 
 

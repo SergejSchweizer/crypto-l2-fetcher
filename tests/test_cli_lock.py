@@ -12,6 +12,7 @@ import pytest
 
 from api import cli
 from api.commands import bronze
+from api.commands import runtime as command_runtime
 from api.constants import (
     BRONZE_BUILDER_COMMAND,
     FUTURES_SUMMARY_BRONZE_BUILDER_COMMAND,
@@ -186,7 +187,7 @@ def test_job_event_logs_use_uniform_key_value_shape(caplog: pytest.LogCaptureFix
     logger = logging.getLogger("test_uniform_job_event")
 
     with caplog.at_level(logging.INFO, logger=logger.name):
-        bronze._log_job_event(
+        command_runtime.log_job_event(
             logger,
             logging.INFO,
             "example-builder",
@@ -208,7 +209,7 @@ def test_dataset_event_logs_include_dataset_envelope(caplog: pytest.LogCaptureFi
     logger = logging.getLogger("test_dataset_event_logs_include_dataset_envelope")
 
     with caplog.at_level(logging.INFO, logger=logger.name):
-        bronze._log_dataset_event(
+        command_runtime.log_dataset_event(
             logger,
             logging.INFO,
             "example-builder",
@@ -231,7 +232,7 @@ def test_dataset_debug_event_is_expressive_and_debug_only(caplog: pytest.LogCapt
     logger.setLevel(logging.INFO)
 
     with caplog.at_level(logging.INFO, logger=logger.name):
-        bronze._log_dataset_debug_event(
+        command_runtime.log_dataset_debug_event(
             logger,
             "example-builder",
             "run_start",
@@ -245,7 +246,7 @@ def test_dataset_debug_event_is_expressive_and_debug_only(caplog: pytest.LogCapt
 
     logger.setLevel(logging.DEBUG)
     with caplog.at_level(logging.DEBUG, logger=logger.name):
-        bronze._log_dataset_debug_event(
+        command_runtime.log_dataset_debug_event(
             logger,
             "example-builder",
             "run_start",
