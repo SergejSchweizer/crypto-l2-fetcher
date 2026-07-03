@@ -26,6 +26,7 @@
 !tests/
 !tests/**
 !scripts/migrate_bronze_hourly_layout.py
+!scripts/prune_bronze_by_disk_usage.py
 !docs/
 !docs/assets/
 

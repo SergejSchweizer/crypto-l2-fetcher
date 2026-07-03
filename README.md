@@ -42,7 +42,8 @@ Author: Sergej Schweizer
 - [8. Operations](#8-operations)
   - [8.1 Idempotency](#81-idempotency)
   - [8.2 Observability and Logging](#82-observability-and-logging)
-  - [8.3 Data Quality](#83-data-quality)
+  - [8.3 Bronze Disk Retention](#83-bronze-disk-retention)
+  - [8.4 Data Quality](#84-data-quality)
 - [9. Risk Notes and Limitations](#9-risk-notes-and-limitations)
 - [10. Roadmap](#10-roadmap)
 
@@ -752,6 +753,7 @@ python main.py validate-symbols --debug --symbols BTC ETH SOL
 * * * * * cd /home/vcs/git/crypto-live-loader && .venv/bin/python main.py volatility-index-bronze-builder --debug --symbols BTC ETH SOL --resolution 60
 15 3 * * * cd /home/vcs/git/crypto-live-loader && .venv/bin/python main.py instrument-metadata-bronze-builder --debug --symbols BTC ETH SOL --kind option
 20 3 * * * cd /home/vcs/git/crypto-live-loader && .venv/bin/python main.py instrument-metadata-bronze-builder --debug --symbols BTC ETH SOL --kind future
+*/15 * * * * cd /home/vcs/git/crypto-live-loader && flock -n .logs/bronze-retention.cron.lock .venv/bin/python -m scripts.prune_bronze_by_disk_usage --bronze-lake-root lake/bronze --trigger-percent 93 --target-percent 90
 ```
 
 ## 7.4 Quality Checks
@@ -839,7 +841,21 @@ Upsert-based datasets merge by natural keys and deterministic sort order:
   paths, and collector-specific timing or window parameters where applicable.
 - Log rotation is controlled by `runtime.log_rotation_days` and `runtime.log_backup_count`.
 
-## 8.3 Data Quality
+## 8.3 Bronze Disk Retention
+
+`scripts/prune_bronze_by_disk_usage.py` protects the VM from Bronze lake disk pressure. It checks the
+filesystem containing `lake/bronze`; when usage reaches `93%`, it deletes the oldest safe Bronze
+partition directories until usage is at or below `90%`. The script only considers Hive-style
+`lake/bronze/dataset_type=*/.../data.parquet` partitions, supports `--dry-run`, and writes JSON
+evidence under `.logs/bronze-retention-evidence`.
+
+Recommended cron:
+
+```cron
+*/15 * * * * cd /home/vcs/git/crypto-live-loader && flock -n .logs/bronze-retention.cron.lock .venv/bin/python -m scripts.prune_bronze_by_disk_usage --bronze-lake-root lake/bronze --trigger-percent 93 --target-percent 90
+```
+
+## 8.4 Data Quality
 
 Built-in validation and normalization behavior:
 
