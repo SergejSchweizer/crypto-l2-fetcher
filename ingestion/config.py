@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeAlias, cast
 
@@ -114,6 +115,101 @@ DEFAULT_CONFIG: Config = {
         },
     },
 }
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeConfig:
+    """Typed runtime configuration resolved from ``config.yaml``.
+
+    Attributes:
+        log_dir (Path): Shared runtime log directory.
+        log_rotation_days (int): Days between log rotations.
+        log_backup_count (int): Number of rotated log archives to retain.
+    """
+
+    log_dir: Path
+    log_rotation_days: int
+    log_backup_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class HttpConfig:
+    """Typed HTTP client configuration resolved from ``config.yaml``.
+
+    Attributes:
+        timeout_s (float): Socket timeout in seconds.
+        max_retries (int): Number of retries after the first request failure.
+        retry_backoff_s (float): Base backoff in seconds between retries.
+    """
+
+    timeout_s: float
+    max_retries: int
+    retry_backoff_s: float
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectConfig:
+    """Typed subset of project configuration used by shared runtime adapters.
+
+    Attributes:
+        runtime (RuntimeConfig): Runtime logging and retention settings.
+        http (HttpConfig): HTTP timeout and retry settings.
+    """
+
+    runtime: RuntimeConfig
+    http: HttpConfig
+
+
+def typed_project_config(config: Config) -> ProjectConfig:
+    """Resolve typed project configuration from a legacy mapping.
+
+    Args:
+        config (Config): Legacy project configuration mapping.
+
+    Returns:
+        ProjectConfig: Typed runtime and HTTP configuration.
+    """
+
+    return ProjectConfig(
+        runtime=typed_runtime_config(config),
+        http=typed_http_config(config),
+    )
+
+
+def typed_runtime_config(config: Config) -> RuntimeConfig:
+    """Resolve typed runtime configuration from a legacy mapping.
+
+    Args:
+        config (Config): Legacy project configuration mapping.
+
+    Returns:
+        RuntimeConfig: Typed runtime configuration.
+    """
+
+    runtime_config = config_section(config, "runtime")
+    return RuntimeConfig(
+        log_dir=_configured_log_dir_from_sections(config=config, runtime_config=runtime_config),
+        log_rotation_days=config_int(runtime_config, "log_rotation_days", 7),
+        log_backup_count=config_int(runtime_config, "log_backup_count", 3),
+    )
+
+
+def typed_http_config(config: Config) -> HttpConfig:
+    """Resolve typed HTTP configuration from a legacy mapping.
+
+    Args:
+        config (Config): Legacy project configuration mapping.
+
+    Returns:
+        HttpConfig: Typed HTTP configuration.
+    """
+
+    http_config = config_section(config, "http")
+    return HttpConfig(
+        timeout_s=config_float(http_config, "timeout_s", 15.0),
+        max_retries=config_int(http_config, "max_retries", 3),
+        retry_backoff_s=config_float(http_config, "retry_backoff_s", 1.0),
+    )
 
 
 def load_config(path: str = "config.yaml") -> Config:
@@ -259,11 +355,16 @@ def config_str_list(section: Config, name: str, default: list[str]) -> list[str]
 def configured_log_dir(config: Config) -> Path:
     """Resolve the canonical log directory from top-level config or runtime fallback."""
 
+    return typed_runtime_config(config).log_dir
+
+
+def _configured_log_dir_from_sections(config: Config, runtime_config: Config) -> Path:
+    """Resolve log directory while preserving legacy top-level ``logfile`` precedence."""
+
     logfile = config.get("logfile")
     if isinstance(logfile, str) and logfile.strip():
         return Path(logfile.strip()).parent
 
-    runtime_config = config_section(config, "runtime")
     log_dir = config_str(runtime_config, "log_dir", ".logs")
     return Path(log_dir)
 
