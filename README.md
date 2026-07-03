@@ -171,6 +171,9 @@ AGENTS.md
 | `pyproject.toml` | Project metadata and Python quality-tool configuration |
 | `main.py` | Python entrypoint wrapper for CLI execution |
 | `AGENTS.md` | Generated repository operating policy |
+| `RISKS.md` | Active risk register and mitigation status |
+| `TIMELINE.md` | Chronological record of dataset, runtime, and operational milestones |
+| `DECISIONS.md` | Durable architecture, naming, and operational decisions |
 
 ---
 
@@ -876,6 +879,10 @@ Built-in validation and normalization behavior:
 
 # 9. Risk Notes and Limitations
 
+The active risk register lives in [`RISKS.md`](RISKS.md). Update it in the same change set as any
+dataset coverage, storage, scheduling, data-quality, or observability change that materially changes
+operational exposure.
+
 - Deribit is the only supported exchange.
 - The repository polls public REST endpoints only; websocket microburst capture is out of scope.
 - Local parquet storage is the only lake backend.
@@ -886,6 +893,9 @@ Built-in validation and normalization behavior:
 ---
 
 # 10. Roadmap
+
+Durable architecture and operational choices are tracked in [`DECISIONS.md`](DECISIONS.md). Delivered
+dataset and runtime milestones are tracked in [`TIMELINE.md`](TIMELINE.md).
 
 - Extract CLI command handlers into focused modules.
 - Add websocket collectors for higher-frequency order-book and ticker state.

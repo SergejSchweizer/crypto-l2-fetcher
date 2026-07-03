@@ -8,6 +8,9 @@
 !.gitignore
 !AGENTS.md
 !README.md
+!RISKS.md
+!TIMELINE.md
+!DECISIONS.md
 !Makefile
 !main.py
 !pyproject.toml
