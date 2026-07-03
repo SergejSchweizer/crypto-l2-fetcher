@@ -691,6 +691,8 @@ Configuration source of truth:
 
 - Runtime file: `config.yaml`
 - Built-in defaults: `ingestion/config.py`
+- Shared runtime adapters resolve typed `RuntimeConfig` and `HttpConfig` DTOs at the boundary while
+  preserving the existing YAML shape.
 
 Key controls:
 

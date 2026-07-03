@@ -8,7 +8,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from api.logging_common import ModuleScopeFilter, log_file_stem_for_module_name, unified_formatter
-from ingestion.config import Config, config_int, config_section, configured_log_dir, load_config
+from ingestion.config import Config, load_config, typed_runtime_config
 
 LOGGER_NAME = "crypto_live_loader"
 DEFAULT_LOG_DIR = ".logs"
@@ -72,11 +72,11 @@ def configure_logging(module_name: str = "crypto-live-loader", config: Config | 
     formatter = unified_formatter()
     scope_filter = ModuleScopeFilter()
     resolved_config = config or load_config()
-    runtime_config = config_section(resolved_config, "runtime")
-    log_dir = configured_log_dir(resolved_config)
+    runtime_config = typed_runtime_config(resolved_config)
+    log_dir = runtime_config.log_dir
     logfile = log_dir / f"{safe_logfile_stem}.log"
-    rotation_days = max(1, config_int(runtime_config, "log_rotation_days", DEFAULT_LOG_ROTATION_DAYS))
-    backup_count = max(0, config_int(runtime_config, "log_backup_count", DEFAULT_LOG_BACKUP_COUNT))
+    rotation_days = max(1, runtime_config.log_rotation_days)
+    backup_count = max(0, runtime_config.log_backup_count)
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
         file_handler = TimedRotatingFileHandler(
