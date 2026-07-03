@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from api import cli
+from api.commands import bronze
 from api.constants import OPTION_INSTRUMENT_TICKER_BRONZE_BUILDER_COMMAND
 from ingestion.config import Config
 from ingestion.option_instrument_ticker import OptionInstrumentTickerSnapshotRow
@@ -100,14 +101,14 @@ def test_option_instrument_ticker_cli_uses_explicit_instruments(
         assert instruments == ["BTC-30JUN26-120000-C"]
         return ({"BTC-30JUN26-120000-C": {"instrument_name": "BTC-30JUN26-120000-C"}}, {})
 
-    monkeypatch.setattr(cli, "_fetch_option_ticker_rows_for_instruments", fake_fetch)
+    monkeypatch.setattr(bronze, "_fetch_option_ticker_rows_for_instruments", fake_fetch)
     monkeypatch.setattr(
-        cli,
+        bronze,
         "normalize_option_instrument_ticker_rows",
         lambda rows, **kwargs: ([_sample_row(next(iter(rows)))], []),
     )
     monkeypatch.setattr(
-        cli,
+        bronze,
         "save_option_instrument_ticker_snapshot_parquet_lake",
         lambda **kwargs: ["/tmp/option_instrument.parquet"],
     )
@@ -149,9 +150,9 @@ def test_option_instrument_ticker_cli_selects_currency_universe(monkeypatch: pyt
             }
         ]
 
-    monkeypatch.setattr(cli, "fetch_option_book_summary_rows", fake_fetch_summary)
+    monkeypatch.setattr(bronze, "fetch_option_book_summary_rows", fake_fetch_summary)
 
-    instruments_by_currency, errors = cli._select_option_ticker_prediction_universe_by_currency(
+    instruments_by_currency, errors = bronze._select_option_ticker_prediction_universe_by_currency(
         currencies=["SOL"],
         explicit_instruments=[],
         max_instruments_per_currency=2,
@@ -176,7 +177,7 @@ def test_option_instrument_ticker_cli_fetches_prediction_universe_for_each_curre
     fetched_batches: list[list[str]] = []
 
     monkeypatch.setattr(
-        cli,
+        bronze,
         "_select_option_ticker_prediction_universe_by_currency",
         lambda **kwargs: (selected_by_currency, []),
     )
@@ -185,14 +186,14 @@ def test_option_instrument_ticker_cli_fetches_prediction_universe_for_each_curre
         fetched_batches.append(instruments)
         return ({instrument: {"instrument_name": instrument} for instrument in instruments}, {})
 
-    monkeypatch.setattr(cli, "_fetch_option_ticker_rows_for_instruments", fake_fetch)
+    monkeypatch.setattr(bronze, "_fetch_option_ticker_rows_for_instruments", fake_fetch)
     monkeypatch.setattr(
-        cli,
+        bronze,
         "normalize_option_instrument_ticker_rows",
         lambda rows, **kwargs: ([_sample_row(instrument) for instrument in rows], []),
     )
     monkeypatch.setattr(
-        cli,
+        bronze,
         "save_option_instrument_ticker_snapshot_parquet_lake",
         lambda **kwargs: ["/tmp/option_instrument.parquet"],
     )

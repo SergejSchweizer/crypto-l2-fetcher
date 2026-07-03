@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from api import cli
+from api.commands import bronze
 from api.constants import (
     BRONZE_BUILDER_COMMAND,
     FUTURES_SUMMARY_BRONZE_BUILDER_COMMAND,
@@ -140,7 +141,7 @@ def test_log_module_name_for_future_instrument_metadata_uses_dataset() -> None:
 
     args = cli.build_parser().parse_args([INSTRUMENT_METADATA_BRONZE_BUILDER_COMMAND, "--kind", "future"])
 
-    assert cli._log_module_name_for_args(args) == "future_instrument_metadata_snapshot_daily"
+    assert bronze.log_module_name_for_args(args) == "future_instrument_metadata_snapshot_daily"
 
 
 def test_l2_parser_defaults_can_come_from_config() -> None:
@@ -185,7 +186,7 @@ def test_job_event_logs_use_uniform_key_value_shape(caplog: pytest.LogCaptureFix
     logger = logging.getLogger("test_uniform_job_event")
 
     with caplog.at_level(logging.INFO, logger=logger.name):
-        cli._log_job_event(
+        bronze._log_job_event(
             logger,
             logging.INFO,
             "example-builder",
@@ -207,7 +208,7 @@ def test_dataset_event_logs_include_dataset_envelope(caplog: pytest.LogCaptureFi
     logger = logging.getLogger("test_dataset_event_logs_include_dataset_envelope")
 
     with caplog.at_level(logging.INFO, logger=logger.name):
-        cli._log_dataset_event(
+        bronze._log_dataset_event(
             logger,
             logging.INFO,
             "example-builder",
@@ -230,7 +231,7 @@ def test_dataset_debug_event_is_expressive_and_debug_only(caplog: pytest.LogCapt
     logger.setLevel(logging.INFO)
 
     with caplog.at_level(logging.INFO, logger=logger.name):
-        cli._log_dataset_debug_event(
+        bronze._log_dataset_debug_event(
             logger,
             "example-builder",
             "run_start",
@@ -244,7 +245,7 @@ def test_dataset_debug_event_is_expressive_and_debug_only(caplog: pytest.LogCapt
 
     logger.setLevel(logging.DEBUG)
     with caplog.at_level(logging.DEBUG, logger=logger.name):
-        cli._log_dataset_debug_event(
+        bronze._log_dataset_debug_event(
             logger,
             "example-builder",
             "run_start",
@@ -325,18 +326,18 @@ def test_l2_symbols_accept_comma_delimited_cli_values() -> None:
 
     args = cli.build_parser().parse_args([BRONZE_BUILDER_COMMAND, "--symbols", "btc,eth", "SOL"])
 
-    assert cli._normalize_cli_symbols(args.symbols) == ["BTC", "ETH", "SOL"]
+    assert bronze._normalize_cli_symbols(args.symbols) == ["BTC", "ETH", "SOL"]
 
 
 def test_cli_normalizers_reject_empty_values() -> None:
     """Verify CLI list normalizers fail clearly on empty inputs."""
 
     with pytest.raises(ValueError, match="at least one symbol"):
-        cli._normalize_cli_symbols(["", ","])
+        bronze._normalize_cli_symbols(["", ","])
     with pytest.raises(ValueError, match="at least one currency"):
-        cli._normalize_cli_currencies(["", ","])
+        bronze._normalize_cli_currencies(["", ","])
     with pytest.raises(ValueError, match="at least one index symbol"):
-        cli._normalize_cli_index_symbols(["", ","])
+        bronze._normalize_cli_index_symbols(["", ","])
 
 
 def test_debug_logging_updates_logger_and_handlers() -> None:
@@ -348,7 +349,7 @@ def test_debug_logging_updates_logger_and_handlers() -> None:
     try:
         logger.setLevel(logging.INFO)
         handler.setLevel(logging.INFO)
-        cli._enable_debug_logging(cli.build_parser().parse_args([BRONZE_BUILDER_COMMAND, "--debug"]), logger)
+        bronze._enable_debug_logging(cli.build_parser().parse_args([BRONZE_BUILDER_COMMAND, "--debug"]), logger)
 
         assert logger.level == logging.DEBUG
         assert handler.level == logging.DEBUG
@@ -363,10 +364,10 @@ def test_persist_bronze_snapshots_reports_parquet_errors(monkeypatch: pytest.Mon
     def raise_parquet_error(**_: object) -> list[str]:
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(cli, "save_perps_l2_snapshot_1m_parquet_lake", raise_parquet_error)
+    monkeypatch.setattr(bronze, "save_perps_l2_snapshot_1m_parquet_lake", raise_parquet_error)
     output: dict[str, object] = {}
 
-    files, error = cli._persist_bronze_snapshots(
+    files, error = bronze._persist_bronze_snapshots(
         snapshots_by_symbol={},
         lake_root="lake/bronze",
         depth=50,
@@ -386,7 +387,7 @@ def test_warn_for_long_poll_schedule_logs_cron_overlap(caplog: pytest.LogCapture
     logger = logging.getLogger("test_l2_schedule_warning")
 
     with caplog.at_level("WARNING", logger=logger.name):
-        cli._warn_for_long_poll_schedule(
+        bronze._warn_for_long_poll_schedule(
             logger=logger,
             snapshot_count=7,
             poll_interval_s=10,
@@ -402,7 +403,7 @@ def test_warn_for_long_poll_schedule_logs_runtime_budget(caplog: pytest.LogCaptu
     logger = logging.getLogger("test_l2_runtime_budget_warning")
 
     with caplog.at_level("WARNING", logger=logger.name):
-        cli._warn_for_long_poll_schedule(
+        bronze._warn_for_long_poll_schedule(
             logger=logger,
             snapshot_count=5,
             poll_interval_s=20,
@@ -440,9 +441,9 @@ def test_validate_symbols_reports_valid_books(monkeypatch: pytest.MonkeyPatch) -
                 current_funding=0.00001,
             )
 
-    monkeypatch.setattr(cli, "source_adapter_for_exchange", lambda exchange: Adapter())
+    monkeypatch.setattr(bronze, "source_adapter_for_exchange", lambda exchange: Adapter())
 
-    result = cli._validate_symbol(exchange="deribit", symbol="SOL", depth=1)
+    result = bronze._validate_symbol(exchange="deribit", symbol="SOL", depth=1)
 
     assert result["normalized_symbol"] == "SOL_USDC-PERPETUAL"
     assert result["valid_book"] is True
@@ -464,9 +465,9 @@ def test_validate_symbols_reports_fetch_errors(monkeypatch: pytest.MonkeyPatch) 
             _ = symbol, depth
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(cli, "source_adapter_for_exchange", lambda exchange: Adapter())
+    monkeypatch.setattr(bronze, "source_adapter_for_exchange", lambda exchange: Adapter())
 
-    result = cli._validate_symbol(exchange="deribit", symbol="BTC", depth=1)
+    result = bronze._validate_symbol(exchange="deribit", symbol="BTC", depth=1)
 
     assert result["normalized_symbol"] == "BTC-PERPETUAL"
     assert result["valid_book"] is False
@@ -479,7 +480,7 @@ def test_run_validate_symbols_rejects_non_positive_depth() -> None:
     args = cli.build_parser().parse_args([VALIDATE_SYMBOLS_COMMAND, "--levels", "0"])
 
     with pytest.raises(ValueError, match="levels must be positive"):
-        cli._run_validate_symbols(args=args, logger=logging.getLogger("test_run_validate_symbols_rejects_depth"))
+        bronze._run_validate_symbols(args=args, logger=logging.getLogger("test_run_validate_symbols_rejects_depth"))
 
 
 def test_main_validate_symbols_outputs_json(
@@ -489,7 +490,7 @@ def test_main_validate_symbols_outputs_json(
     """Verify the validate-symbols command prints a validation summary."""
 
     monkeypatch.setattr(
-        cli,
+        bronze,
         "_validate_symbol",
         lambda exchange, symbol, depth: {
             "symbol": symbol,
@@ -539,7 +540,7 @@ def test_main_loader_l2_outputs_raw_snapshots(
         current_funding=0.00001,
     )
 
-    monkeypatch.setattr(cli, "fetch_perps_l2_snapshot_1m_for_symbols", lambda **kwargs: {"BTC": [snapshot]})
+    monkeypatch.setattr(bronze, "fetch_perps_l2_snapshot_1m_for_symbols", lambda **kwargs: {"BTC": [snapshot]})
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -587,8 +588,8 @@ def test_main_loader_l2_persists_raw_snapshots_to_lake(
         calls.append(kwargs)
         return ["/tmp/lake/bronze/dataset_type=perps_l2_snapshot_1m/data.parquet"]
 
-    monkeypatch.setattr(cli, "fetch_perps_l2_snapshot_1m_for_symbols", lambda **kwargs: {"BTC": [snapshot]})
-    monkeypatch.setattr(cli, "save_perps_l2_snapshot_1m_parquet_lake", fake_save_perps_l2_snapshot_1m_parquet_lake)
+    monkeypatch.setattr(bronze, "fetch_perps_l2_snapshot_1m_for_symbols", lambda **kwargs: {"BTC": [snapshot]})
+    monkeypatch.setattr(bronze, "save_perps_l2_snapshot_1m_parquet_lake", fake_save_perps_l2_snapshot_1m_parquet_lake)
     monkeypatch.setattr(
         "sys.argv",
         [

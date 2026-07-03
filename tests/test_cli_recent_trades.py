@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from api import cli
+from api.commands import bronze
 from api.constants import RECENT_TRADES_BRONZE_BUILDER_COMMAND
 from ingestion.config import Config
 from ingestion.recent_trades import RecentTradeSnapshotRow
@@ -120,11 +121,11 @@ def test_recent_trades_cli_fetches_all_requested_currency_kind_scopes(
             [],
         )
 
-    monkeypatch.setattr(cli, "_fetch_recent_trade_rows_for_requests", fake_fetch)
-    monkeypatch.setattr(cli, "normalize_recent_trade_rows", fake_normalize)
-    monkeypatch.setattr(cli, "save_recent_trade_snapshot_parquet_lake", lambda **kwargs: ["/tmp/trades.parquet"])
+    monkeypatch.setattr(bronze, "_fetch_recent_trade_rows_for_requests", fake_fetch)
+    monkeypatch.setattr(bronze, "normalize_recent_trade_rows", fake_normalize)
+    monkeypatch.setattr(bronze, "save_recent_trade_snapshot_parquet_lake", lambda **kwargs: ["/tmp/trades.parquet"])
     monkeypatch.setattr(
-        cli,
+        bronze,
         "recent_trade_snapshot_time_floor_minute",
         lambda: datetime(2026, 5, 24, 7, 15, tzinfo=UTC),
     )
@@ -179,13 +180,13 @@ def test_recent_trades_cli_reports_partial_scope_failure(
         _ = (count, start_timestamp, sorting)
         return ({"BTC:future": [{"trade_id": "1"}]}, {"ETH:future": "upstream timeout"})
 
-    monkeypatch.setattr(cli, "_fetch_recent_trade_rows_for_requests", fake_fetch)
+    monkeypatch.setattr(bronze, "_fetch_recent_trade_rows_for_requests", fake_fetch)
     monkeypatch.setattr(
-        cli,
+        bronze,
         "normalize_recent_trade_rows",
         lambda rows, **kwargs: ([_sample_row("BTC", "BTC", "future")] if rows else [], []),
     )
-    monkeypatch.setattr(cli, "save_recent_trade_snapshot_parquet_lake", lambda **kwargs: ["/tmp/trades.parquet"])
+    monkeypatch.setattr(bronze, "save_recent_trade_snapshot_parquet_lake", lambda **kwargs: ["/tmp/trades.parquet"])
     monkeypatch.setattr(
         "sys.argv",
         [

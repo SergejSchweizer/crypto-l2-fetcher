@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from api import cli
+from api.commands import bronze
 from api.constants import OPTIONS_BRONZE_BUILDER_COMMAND
 from ingestion.config import Config
 from ingestion.options import OptionTickerSnapshotRow
@@ -96,12 +97,12 @@ def test_cli_options_bronze_builder_outputs_json(
         )
 
     monkeypatch.setattr(
-        cli,
+        bronze,
         "_fetch_options_rows_for_currencies",
         fake_fetch,
     )
     monkeypatch.setattr(
-        cli,
+        bronze,
         "normalize_options_ticker_rows",
         lambda rows, **kwargs: (
             [
@@ -116,7 +117,7 @@ def test_cli_options_bronze_builder_outputs_json(
             [],
         ),
     )
-    monkeypatch.setattr(cli, "save_options_ticker_snapshot_parquet_lake", lambda **kwargs: ["/tmp/options.parquet"])
+    monkeypatch.setattr(bronze, "save_options_ticker_snapshot_parquet_lake", lambda **kwargs: ["/tmp/options.parquet"])
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -155,12 +156,12 @@ def test_partial_currency_failure_still_writes_successful_assets(
         )
 
     monkeypatch.setattr(
-        cli,
+        bronze,
         "_fetch_options_rows_for_currencies",
         fake_fetch,
     )
     monkeypatch.setattr(
-        cli,
+        bronze,
         "normalize_options_ticker_rows",
         lambda rows, **kwargs: (
             [
@@ -175,7 +176,7 @@ def test_partial_currency_failure_still_writes_successful_assets(
         ),
     )
     monkeypatch.setattr(
-        cli,
+        bronze,
         "save_options_ticker_snapshot_parquet_lake",
         lambda **kwargs: ["/tmp/btc.parquet", "/tmp/sol.parquet"],
     )
@@ -210,9 +211,9 @@ def test_options_bronze_legacy_currencies_flag_is_still_supported(
     def fake_fetch(currencies: list[str]) -> FetchResult:
         return ({currency: [] for currency in currencies}, {currency: currency for currency in currencies}, {})
 
-    monkeypatch.setattr(cli, "_fetch_options_rows_for_currencies", fake_fetch)
+    monkeypatch.setattr(bronze, "_fetch_options_rows_for_currencies", fake_fetch)
     monkeypatch.setattr(
-        cli,
+        bronze,
         "normalize_options_ticker_rows",
         lambda rows, **kwargs: ([], []),
     )

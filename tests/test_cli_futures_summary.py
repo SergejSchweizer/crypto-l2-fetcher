@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from api import cli
+from api.commands import bronze
 from api.constants import FUTURES_SUMMARY_BRONZE_BUILDER_COMMAND
 from ingestion.config import Config
 from ingestion.futures_summary import FuturesSummarySnapshotRow
@@ -72,16 +73,16 @@ def test_futures_summary_cli_outputs_json(monkeypatch: pytest.MonkeyPatch, capsy
     """Verify futures summary CLI fetches and writes normalized rows."""
 
     monkeypatch.setattr(
-        cli,
+        bronze,
         "fetch_futures_book_summary_rows",
         lambda currency: ([{"instrument_name": currency}], currency),
     )
     monkeypatch.setattr(
-        cli,
+        bronze,
         "normalize_futures_summary_rows",
         lambda rows, **kwargs: ([_sample_row(str(kwargs["requested_currency"]), str(kwargs["source_currency"]))], []),
     )
-    monkeypatch.setattr(cli, "save_futures_summary_snapshot_parquet_lake", lambda **kwargs: ["/tmp/futures.parquet"])
+    monkeypatch.setattr(bronze, "save_futures_summary_snapshot_parquet_lake", lambda **kwargs: ["/tmp/futures.parquet"])
     monkeypatch.setattr("sys.argv", ["main.py", FUTURES_SUMMARY_BRONZE_BUILDER_COMMAND, "--symbols", "BTC"])
 
     cli.main()

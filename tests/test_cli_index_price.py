@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from api import cli
+from api.commands import bronze
 from api.constants import INDEX_PRICE_BRONZE_BUILDER_COMMAND
 from ingestion.config import Config
 
@@ -44,9 +45,9 @@ def test_cli_index_price_bronze_builder_outputs_json(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(cli, "fetch_index_price", lambda _: 12345.67)
+    monkeypatch.setattr(bronze, "fetch_index_price", lambda _: 12345.67)
     monkeypatch.setattr(
-        cli,
+        bronze,
         "save_index_price_snapshot_parquet_lake",
         lambda **kwargs: ["/tmp/index_price.parquet"],
     )

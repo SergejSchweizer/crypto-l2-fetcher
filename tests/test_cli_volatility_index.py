@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from api import cli
+from api.commands import bronze
 from api.constants import VOLATILITY_INDEX_BRONZE_BUILDER_COMMAND
 from ingestion.config import Config
 from ingestion.volatility_index import VolatilityIndexSnapshotRow
@@ -61,15 +62,19 @@ def _sample_row(currency: str, source_currency: str) -> VolatilityIndexSnapshotR
 def test_volatility_index_cli_outputs_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Verify volatility-index CLI fetches and writes normalized rows."""
 
-    monkeypatch.setattr(cli, "fetch_volatility_index_candles", lambda currency, **kwargs: ([[1, 2, 3, 4, 5]], currency))
     monkeypatch.setattr(
-        cli,
+        bronze,
+        "fetch_volatility_index_candles",
+        lambda currency, **kwargs: ([[1, 2, 3, 4, 5]], currency),
+    )
+    monkeypatch.setattr(
+        bronze,
         "normalize_volatility_index_candles",
         lambda candles, **kwargs: ([_sample_row(str(kwargs["currency"]), str(kwargs["source_currency"]))], []),
     )
-    monkeypatch.setattr(cli, "save_volatility_index_snapshot_parquet_lake", lambda **kwargs: ["/tmp/vol.parquet"])
+    monkeypatch.setattr(bronze, "save_volatility_index_snapshot_parquet_lake", lambda **kwargs: ["/tmp/vol.parquet"])
     monkeypatch.setattr(
-        cli,
+        bronze,
         "volatility_index_snapshot_time_floor_minute",
         lambda: datetime(2026, 5, 24, 7, 15, tzinfo=UTC),
     )

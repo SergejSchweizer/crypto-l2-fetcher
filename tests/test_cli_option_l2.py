@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from api import cli
+from api.commands import bronze
 from api.constants import OPTION_L2_BRONZE_BUILDER_COMMAND
 from ingestion.config import Config
 from ingestion.option_l2 import OptionL2SnapshotRow
@@ -122,10 +123,10 @@ def test_option_l2_cli_uses_explicit_instruments(
         _ = kwargs
         return [_sample_row(next(iter(rows)))], []
 
-    monkeypatch.setattr(cli, "_fetch_option_l2_rows_for_instruments", fake_fetch)
-    monkeypatch.setattr(cli, "normalize_option_l2_snapshot_rows", fake_normalize)
+    monkeypatch.setattr(bronze, "_fetch_option_l2_rows_for_instruments", fake_fetch)
+    monkeypatch.setattr(bronze, "normalize_option_l2_snapshot_rows", fake_normalize)
     monkeypatch.setattr(
-        cli,
+        bronze,
         "save_option_l2_snapshot_parquet_lake",
         lambda **kwargs: ["/tmp/option_l2.parquet"],
     )
@@ -165,7 +166,7 @@ def test_option_l2_cli_fetches_prediction_universe_for_each_currency(
     fetched_batches: list[list[str]] = []
 
     monkeypatch.setattr(
-        cli,
+        bronze,
         "_select_option_ticker_prediction_universe_by_currency",
         lambda **kwargs: (selected_by_currency, []),
     )
@@ -183,14 +184,14 @@ def test_option_l2_cli_fetches_prediction_universe_for_each_currency(
             {},
         )
 
-    monkeypatch.setattr(cli, "_fetch_option_l2_rows_for_instruments", fake_fetch)
+    monkeypatch.setattr(bronze, "_fetch_option_l2_rows_for_instruments", fake_fetch)
     monkeypatch.setattr(
-        cli,
+        bronze,
         "normalize_option_l2_snapshot_rows",
         lambda rows, **kwargs: ([_sample_row(instrument, depth=kwargs["depth"]) for instrument in rows], []),
     )
     monkeypatch.setattr(
-        cli,
+        bronze,
         "save_option_l2_snapshot_parquet_lake",
         lambda **kwargs: ["/tmp/option_l2.parquet"],
     )
