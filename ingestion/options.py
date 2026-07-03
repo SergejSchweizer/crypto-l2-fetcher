@@ -2,17 +2,33 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
+from ingestion import normalization as _normalization
+from ingestion.normalization import (
+    looks_like_option_instrument as _looks_like_option_instrument,
+)
+from ingestion.normalization import (
+    raw_payload_hash as _raw_payload_hash,
+)
+from ingestion.normalization import (
+    timestamp_ms_to_datetime as _timestamp_ms_to_datetime,
+)
+from ingestion.normalization import (
+    to_optional_float as _to_optional_float,
+)
+from ingestion.normalization import (
+    to_optional_str as _to_optional_str,
+)
 from sources.deribit_options import DERIBIT_OPTIONS_SOURCE
 
 OPTIONS_TICKER_DATASET_TYPE = "options_ticker_snapshot_1m"
 OPTION_TICKER_DATASET_TYPE = OPTIONS_TICKER_DATASET_TYPE
 OPTION_TICKER_SCHEMA_VERSION = "v1"
 OPTION_TICKER_SOURCE = "rest_get_book_summary_by_currency"
+snapshot_time_floor_minute = _normalization.snapshot_time_floor_minute
+utc_run_id = _normalization.utc_run_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,20 +66,6 @@ class OptionTickerSnapshotRow:
     price_change: float | None
     raw_payload_hash: str
     schema_version: str
-
-
-def utc_run_id() -> str:
-    """Create a UTC run identifier for option bronze writes."""
-
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-
-
-def snapshot_time_floor_minute(now: datetime | None = None) -> datetime:
-    """Return a UTC snapshot time floored to minute."""
-
-    base = now or datetime.now(UTC)
-    utc_base = base.astimezone(UTC)
-    return utc_base.replace(second=0, microsecond=0)
 
 
 def normalize_options_ticker_rows(
@@ -154,43 +156,6 @@ def _normalize_options_ticker_row(
         raw_payload_hash=_raw_payload_hash(row),
         schema_version=schema_version,
     )
-
-
-def _looks_like_option_instrument(instrument_name: str) -> bool:
-    """Return whether an instrument name resembles Deribit option naming."""
-
-    parts = instrument_name.split("-")
-    if len(parts) < 4:
-        return False
-    option_type = parts[-1]
-    if option_type not in {"C", "P"}:
-        return False
-    return parts[-2].replace(".", "", 1).isdigit()
-
-
-def _timestamp_ms_to_datetime(value: object) -> datetime | None:
-    if value is None:
-        return None
-    if not isinstance(value, int | float):
-        return None
-    return datetime.fromtimestamp(float(value) / 1000.0, tz=UTC)
-
-
-def _to_optional_float(value: object) -> float | None:
-    if value is None:
-        return None
-    return float(str(value))
-
-
-def _to_optional_str(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-def _raw_payload_hash(row: dict[str, object]) -> str:
-    encoded = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def source_endpoint_name() -> str:

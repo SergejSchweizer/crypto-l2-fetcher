@@ -2,15 +2,35 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import cast
+
+from ingestion import normalization as _normalization
+from ingestion.normalization import (
+    looks_like_option_instrument as _looks_like_option_instrument,
+)
+from ingestion.normalization import (
+    option_currency as _option_currency,
+)
+from ingestion.normalization import (
+    raw_payload_hash as _raw_payload_hash,
+)
+from ingestion.normalization import (
+    timestamp_ms_to_datetime as _timestamp_ms_to_datetime,
+)
+from ingestion.normalization import (
+    to_optional_float as _to_optional_float,
+)
+from ingestion.normalization import (
+    to_optional_str as _to_optional_str,
+)
 
 OPTION_L2_DATASET_TYPE = "options_l2_snapshot_1m"
 OPTION_L2_SCHEMA_VERSION = "v1"
 OPTION_L2_SOURCE = "rest_get_order_book"
+snapshot_time_floor_minute = _normalization.snapshot_time_floor_minute
+utc_run_id = _normalization.utc_run_id
 
 BookLevels = list[dict[str, float]]
 
@@ -65,19 +85,6 @@ class OptionL2SnapshotRow:
     vega: float | None
     rho: float | None
     raw_payload_hash: str
-
-
-def utc_run_id() -> str:
-    """Create a UTC run identifier for option L2 Bronze writes."""
-
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-
-
-def snapshot_time_floor_minute(now: datetime | None = None) -> datetime:
-    """Return a UTC snapshot time floored to minute."""
-
-    base = now or datetime.now(UTC)
-    return base.astimezone(UTC).replace(second=0, microsecond=0)
 
 
 def normalize_option_l2_snapshot_rows(
@@ -190,18 +197,6 @@ def _normalize_option_l2_snapshot_row(
     )
 
 
-def _looks_like_option_instrument(instrument_name: str) -> bool:
-    parts = instrument_name.split("-")
-    if len(parts) < 4:
-        return False
-    return parts[-1] in {"C", "P"} and parts[-2].replace(".", "", 1).isdigit()
-
-
-def _option_currency(instrument_name: str) -> str:
-    base = instrument_name.split("-", 1)[0]
-    return base.removesuffix("_USDC")
-
-
 def _book_levels(value: object) -> BookLevels:
     if not isinstance(value, list):
         return []
@@ -211,26 +206,3 @@ def _book_levels(value: object) -> BookLevels:
             continue
         levels.append({"price": float(str(level[0])), "amount": float(str(level[1]))})
     return levels
-
-
-def _timestamp_ms_to_datetime(value: object) -> datetime | None:
-    if value is None or not isinstance(value, int | float):
-        return None
-    return datetime.fromtimestamp(float(value) / 1000.0, tz=UTC)
-
-
-def _to_optional_float(value: object) -> float | None:
-    if value is None:
-        return None
-    return float(str(value))
-
-
-def _to_optional_str(value: object) -> str | None:
-    if value is None:
-        return None
-    return str(value)
-
-
-def _raw_payload_hash(row: dict[str, object]) -> str:
-    encoded = json.dumps(row, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
