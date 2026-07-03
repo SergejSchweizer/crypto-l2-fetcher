@@ -8,7 +8,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-INDEX_PRICE_DATASET_TYPE = "index_price_snapshot_1m"
+from domain.datasets import INDEX_PRICE_SNAPSHOT_1M
+
+INDEX_PRICE_DATASET_TYPE = INDEX_PRICE_SNAPSHOT_1M.dataset_type
 INDEX_PRICE_SCHEMA_VERSION = "v1"
 INDEX_PRICE_SOURCE = "rest_get_index_price"
 

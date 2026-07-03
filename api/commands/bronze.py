@@ -80,7 +80,7 @@ from ingestion.instrument_metadata import (
     utc_run_id as instrument_utc_run_id,
 )
 from ingestion.instrument_metadata_lake import save_instrument_metadata_snapshot_parquet_lake
-from ingestion.l2 import L2Snapshot, fetch_perps_l2_snapshot_1m_for_symbols
+from ingestion.l2 import PERPS_L2_DATASET_TYPE, L2Snapshot, fetch_perps_l2_snapshot_1m_for_symbols
 from ingestion.lake import save_perps_l2_snapshot_1m_parquet_lake
 from ingestion.option_instrument_ticker import (
     OPTION_INSTRUMENT_TICKER_DATASET_TYPE,
@@ -413,7 +413,7 @@ def _log_bronze_builder_summary(
         logging.INFO,
         BRONZE_BUILDER_COMMAND,
         "run_summary",
-        dataset_type="perps_l2_snapshot_1m",
+        dataset_type=PERPS_L2_DATASET_TYPE,
         elapsed_s=elapsed_s,
         errors=1 if parquet_error is not None else 0,
         exchange=exchange,
@@ -453,7 +453,7 @@ def _build_snapshot_output(
             logging.INFO,
             BRONZE_BUILDER_COMMAND,
             "snapshot_stats",
-            dataset_type="perps_l2_snapshot_1m",
+            dataset_type=PERPS_L2_DATASET_TYPE,
             exchange=exchange,
             snapshots_collected=len(snapshots),
             snapshots_requested=requested_snapshots,
@@ -549,7 +549,7 @@ def _run_bronze_builder(args: argparse.Namespace, logger: logging.Logger, config
         logger,
         BRONZE_BUILDER_COMMAND,
         "run_start",
-        dataset_type="perps_l2_snapshot_1m",
+        dataset_type=PERPS_L2_DATASET_TYPE,
         exchange=exchange,
         depth=int(args.levels),
         lake_root=cast(str, args.lake_root),
@@ -577,7 +577,7 @@ def _run_bronze_builder(args: argparse.Namespace, logger: logging.Logger, config
         logger,
         BRONZE_BUILDER_COMMAND,
         "collection_complete",
-        dataset_type="perps_l2_snapshot_1m",
+        dataset_type=PERPS_L2_DATASET_TYPE,
         exchange=exchange,
         snapshots_collected=sum(len(snapshots) for snapshots in snapshots_by_symbol.values()),
         snapshots_by_symbol={symbol: len(snapshots_by_symbol.get(symbol, [])) for symbol in symbols},
@@ -603,7 +603,7 @@ def _run_bronze_builder(args: argparse.Namespace, logger: logging.Logger, config
         logger,
         BRONZE_BUILDER_COMMAND,
         "persistence_complete",
-        dataset_type="perps_l2_snapshot_1m",
+        dataset_type=PERPS_L2_DATASET_TYPE,
         exchange=exchange,
         files=len(parquet_files),
         output_files=parquet_files,

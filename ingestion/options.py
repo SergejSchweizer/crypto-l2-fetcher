@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from domain.datasets import OPTIONS_TICKER_SNAPSHOT_1M
 from ingestion import normalization as _normalization
 from ingestion.normalization import (
     looks_like_option_instrument as _looks_like_option_instrument,
@@ -23,7 +24,7 @@ from ingestion.normalization import (
 )
 from sources.deribit_options import DERIBIT_OPTIONS_SOURCE
 
-OPTIONS_TICKER_DATASET_TYPE = "options_ticker_snapshot_1m"
+OPTIONS_TICKER_DATASET_TYPE = OPTIONS_TICKER_SNAPSHOT_1M.dataset_type
 OPTION_TICKER_DATASET_TYPE = OPTIONS_TICKER_DATASET_TYPE
 OPTION_TICKER_SCHEMA_VERSION = "v1"
 OPTION_TICKER_SOURCE = "rest_get_book_summary_by_currency"

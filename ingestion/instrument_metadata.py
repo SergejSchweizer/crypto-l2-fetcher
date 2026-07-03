@@ -7,8 +7,13 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-INSTRUMENT_METADATA_DATASET_TYPE = "instrument_metadata_snapshot_daily"
-FUTURE_INSTRUMENT_METADATA_DATASET_TYPE = "future_instrument_metadata_snapshot_daily"
+from domain.datasets import (
+    FUTURE_INSTRUMENT_METADATA_SNAPSHOT_DAILY,
+    INSTRUMENT_METADATA_SNAPSHOT_DAILY,
+)
+
+INSTRUMENT_METADATA_DATASET_TYPE = INSTRUMENT_METADATA_SNAPSHOT_DAILY.dataset_type
+FUTURE_INSTRUMENT_METADATA_DATASET_TYPE = FUTURE_INSTRUMENT_METADATA_SNAPSHOT_DAILY.dataset_type
 INSTRUMENT_METADATA_SCHEMA_VERSION = "v1"
 INSTRUMENT_METADATA_SOURCE = "rest_get_instruments"
 

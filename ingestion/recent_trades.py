@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from domain.datasets import RECENT_TRADE_SNAPSHOT_1M
 from ingestion import normalization as _normalization
 from ingestion.normalization import (
     raw_payload_hash as _raw_payload_hash,
@@ -22,7 +23,7 @@ from ingestion.normalization import (
     to_optional_str as _to_optional_str,
 )
 
-RECENT_TRADE_DATASET_TYPE = "recent_trade_snapshot_1m"
+RECENT_TRADE_DATASET_TYPE = RECENT_TRADE_SNAPSHOT_1M.dataset_type
 RECENT_TRADE_SCHEMA_VERSION = "v1"
 RECENT_TRADE_SOURCE = "rest_get_last_trades_by_currency"
 snapshot_time_floor_minute = _normalization.snapshot_time_floor_minute
