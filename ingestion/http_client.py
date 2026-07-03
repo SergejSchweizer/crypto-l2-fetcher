@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-from ingestion.config import config_float, config_int, config_section, load_config
+from ingestion.config import load_config, typed_http_config
 
 
 class HttpClientError(RuntimeError):
@@ -31,11 +31,11 @@ class HttpRequestConfig:
 def default_http_request_config() -> HttpRequestConfig:
     """Load default HTTP settings once per process."""
 
-    http_config = config_section(load_config(), "http")
+    http_config = typed_http_config(load_config())
     return HttpRequestConfig(
-        timeout_s=config_float(http_config, "timeout_s", 15.0),
-        max_retries=config_int(http_config, "max_retries", 3),
-        retry_backoff_s=config_float(http_config, "retry_backoff_s", 1.0),
+        timeout_s=http_config.timeout_s,
+        max_retries=http_config.max_retries,
+        retry_backoff_s=http_config.retry_backoff_s,
     )
 
 
