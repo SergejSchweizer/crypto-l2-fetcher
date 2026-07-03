@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import cast
 
 from ingestion.index_price import IndexPriceSnapshotRow
-from ingestion.parquet_repository import ParquetUpsertRepository
+from ingestion.lake_writer import upsert_partitioned_records
 
 IndexPricePartitionKey = tuple[str, str, str, str, str, str, str]
 IndexPriceNaturalKey = tuple[str, str, datetime, str]
@@ -65,32 +64,28 @@ def save_index_price_snapshot_parquet_lake(
     lake_root: str,
 ) -> list[str]:
     """Persist index price rows into idempotent parquet partitions."""
-    repository = ParquetUpsertRepository()
 
-    grouped: defaultdict[IndexPricePartitionKey, list[dict[str, object]]] = defaultdict(list)
-    for rows in rows_by_index.values():
-        for row in rows:
-            key: IndexPricePartitionKey = (
-                row.dataset_type,
-                row.exchange,
-                row.index_name,
-                row.snapshot_time.strftime("%Y"),
-                row.snapshot_time.strftime("%m"),
-                row.snapshot_time.strftime("%d"),
-                row.snapshot_time.strftime("%H"),
-            )
-            grouped[key].append(index_price_snapshot_record(row))
-
-    written_files: list[str] = []
-    for key, records in grouped.items():
-        part_dir = index_price_partition_path(lake_root=lake_root, key=key)
-        file_path = part_dir / "data.parquet"
-        written_files.append(
-            repository.upsert(
-                file_path=file_path,
-                records=records,
-                natural_key=lambda item: _natural_key(item),
-                sort_key=lambda item: cast(datetime, item["event_time"]),
-            )
+    def partition_key(row: IndexPriceSnapshotRow) -> IndexPricePartitionKey:
+        return (
+            row.dataset_type,
+            row.exchange,
+            row.index_name,
+            row.snapshot_time.strftime("%Y"),
+            row.snapshot_time.strftime("%m"),
+            row.snapshot_time.strftime("%d"),
+            row.snapshot_time.strftime("%H"),
         )
-    return sorted(written_files)
+
+    return upsert_partitioned_records(
+        rows=(row for rows in rows_by_index.values() for row in rows),
+        lake_root=lake_root,
+        partition_key=partition_key,
+        partition_path=lambda root, key: index_price_partition_path(
+            lake_root=root,
+            key=cast(IndexPricePartitionKey, key),
+        ),
+        record_builder=index_price_snapshot_record,
+        natural_key=_natural_key,
+        sort_key=lambda item: cast(datetime, item["event_time"]),
+        staging_name=lambda _records: ".staging-data.parquet",
+    )

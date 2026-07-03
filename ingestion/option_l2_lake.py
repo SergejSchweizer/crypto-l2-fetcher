@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
+from ingestion.lake_writer import upsert_partitioned_records
 from ingestion.option_l2 import OptionL2SnapshotRow
-from ingestion.parquet_repository import ParquetUpsertRepository
 
 OptionL2PartitionKey = tuple[str, str, str, str, str, int, str, str, str, str, str]
 OptionL2NaturalKey = tuple[str, str, str, int, datetime]
@@ -124,10 +124,8 @@ def _sort_key(record: dict[str, object]) -> str:
 def save_option_l2_snapshot_parquet_lake(rows: list[OptionL2SnapshotRow], lake_root: str) -> list[str]:
     """Upsert option order-book rows into hourly Bronze parquet files."""
 
-    repository = ParquetUpsertRepository()
-    grouped: defaultdict[OptionL2PartitionKey, list[dict[str, object]]] = defaultdict(list)
-    for row in rows:
-        key: OptionL2PartitionKey = (
+    def partition_key(row: OptionL2SnapshotRow) -> OptionL2PartitionKey:
+        return (
             row.dataset_type,
             row.exchange,
             row.instrument_type,
@@ -140,18 +138,17 @@ def save_option_l2_snapshot_parquet_lake(rows: list[OptionL2SnapshotRow], lake_r
             row.snapshot_time.strftime("%d"),
             row.snapshot_time.strftime("%H"),
         )
-        grouped[key].append(option_l2_snapshot_record(row))
 
-    written_files: list[str] = []
-    for key, records in grouped.items():
-        file_path = option_l2_partition_path(lake_root=lake_root, key=key) / "data.parquet"
-        written_files.append(
-            repository.upsert(
-                file_path=file_path,
-                records=records,
-                natural_key=lambda item: _natural_key(item),
-                sort_key=lambda item: _sort_key(item),
-                staging_name=f".staging-{records[0]['run_id']}.parquet",
-            )
-        )
-    return sorted(written_files)
+    return upsert_partitioned_records(
+        rows=rows,
+        lake_root=lake_root,
+        partition_key=partition_key,
+        partition_path=lambda root, key: option_l2_partition_path(
+            lake_root=root,
+            key=cast(OptionL2PartitionKey, key),
+        ),
+        record_builder=option_l2_snapshot_record,
+        natural_key=_natural_key,
+        sort_key=_sort_key,
+        staging_name=lambda records: f".staging-{records[0]['run_id']}.parquet",
+    )

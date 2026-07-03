@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import concurrent.futures
-from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -13,7 +11,7 @@ from ingestion.l2 import (
     perps_l2_snapshot_1m_partition_key,
     perps_l2_snapshot_1m_record,
 )
-from ingestion.parquet_repository import ParquetUpsertRepository
+from ingestion.lake_writer import upsert_partitioned_records
 
 SnapshotPartitionKey = tuple[str, str, str, int, str, str, str, str, str]
 SnapshotNaturalKey = tuple[str, str, str, int, str, datetime]
@@ -80,40 +78,30 @@ def save_perps_l2_snapshot_1m_parquet_lake(
 
     run_id = utc_run_id()
     ingested_at = datetime.now(UTC)
-    repository = ParquetUpsertRepository()
 
-    grouped: defaultdict[SnapshotPartitionKey, list[dict[str, object]]] = defaultdict(list)
-    for snapshots in snapshots_by_symbol.values():
-        for snapshot in snapshots:
-            key = perps_l2_snapshot_1m_partition_key(snapshot=snapshot, depth=depth, source=source)
-            grouped[key].append(
-                perps_l2_snapshot_1m_record(
-                    snapshot=snapshot,
-                    depth=depth,
-                    run_id=run_id,
-                    ingested_at=ingested_at,
-                    source=source,
-                )
-            )
-
-    def _write_one_partition(key: SnapshotPartitionKey, rows: list[dict[str, object]]) -> str:
-        part_dir = snapshot_partition_path(lake_root=lake_root, key=key)
-        part_dir.mkdir(parents=True, exist_ok=True)
-        file_path = part_dir / "data.parquet"
-        return repository.upsert(
-            file_path=file_path,
-            records=rows,
-            natural_key=lambda item: snapshot_record_natural_key(item),
-            sort_key=lambda item: cast(datetime, item["event_time"]),
-            staging_name=f".staging-{run_id}.parquet",
+    def record_builder(snapshot: L2Snapshot) -> dict[str, object]:
+        return perps_l2_snapshot_1m_record(
+            snapshot=snapshot,
+            depth=depth,
+            run_id=run_id,
+            ingested_at=ingested_at,
+            source=source,
         )
 
-    written_files: list[str] = []
-    if grouped:
-        max_workers = min(4, len(grouped))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_write_one_partition, key, rows) for key, rows in grouped.items()]
-            for future in concurrent.futures.as_completed(futures):
-                written_files.append(future.result())
-
-    return sorted(written_files)
+    return upsert_partitioned_records(
+        rows=(snapshot for snapshots in snapshots_by_symbol.values() for snapshot in snapshots),
+        lake_root=lake_root,
+        partition_key=lambda snapshot: perps_l2_snapshot_1m_partition_key(
+            snapshot=snapshot,
+            depth=depth,
+            source=source,
+        ),
+        partition_path=lambda root, key: snapshot_partition_path(
+            lake_root=root,
+            key=cast(SnapshotPartitionKey, key),
+        ),
+        record_builder=record_builder,
+        natural_key=snapshot_record_natural_key,
+        sort_key=lambda item: cast(datetime, item["event_time"]),
+        staging_name=lambda _records: f".staging-{run_id}.parquet",
+    )

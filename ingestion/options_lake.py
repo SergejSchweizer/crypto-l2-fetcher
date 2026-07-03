@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
+from ingestion.lake_writer import upsert_partitioned_records
 from ingestion.options import OptionTickerSnapshotRow
-from ingestion.parquet_repository import ParquetUpsertRepository
 
 OptionPartitionKey = tuple[str, str, str, str, str, str, str, str]
 OptionNaturalKey = tuple[str, str, str, str, datetime]
@@ -106,38 +106,31 @@ def save_options_ticker_snapshot_parquet_lake(
 ) -> list[str]:
     """Upsert option snapshot rows into one hourly bronze parquet file per partition."""
 
-    repository = ParquetUpsertRepository()
-
-    grouped: defaultdict[OptionPartitionKey, list[dict[str, object]]] = defaultdict(list)
-    for rows in rows_by_currency.values():
-        for row in rows:
-            key: OptionPartitionKey = (
-                row.dataset_type,
-                row.exchange,
-                row.instrument_type,
-                row.currency,
-                row.snapshot_time.strftime("%Y"),
-                row.snapshot_time.strftime("%m"),
-                row.snapshot_time.strftime("%d"),
-                row.snapshot_time.strftime("%H"),
-            )
-            grouped[key].append(options_ticker_snapshot_record(row))
-
-    written_files: list[str] = []
-    for key, records in grouped.items():
-        part_dir = option_snapshot_partition_path(lake_root=lake_root, key=key)
-        file_path = part_dir / "data.parquet"
-        written_files.append(
-            repository.upsert(
-                file_path=file_path,
-                records=records,
-                natural_key=lambda item: _option_snapshot_natural_key(item),
-                sort_key=lambda item: _option_snapshot_sort_key(item),
-                staging_name=f".staging-{records[0]['run_id']}.parquet",
-            )
+    def partition_key(row: OptionTickerSnapshotRow) -> OptionPartitionKey:
+        return (
+            row.dataset_type,
+            row.exchange,
+            row.instrument_type,
+            row.currency,
+            row.snapshot_time.strftime("%Y"),
+            row.snapshot_time.strftime("%m"),
+            row.snapshot_time.strftime("%d"),
+            row.snapshot_time.strftime("%H"),
         )
 
-    return sorted(written_files)
+    return upsert_partitioned_records(
+        rows=(row for rows in rows_by_currency.values() for row in rows),
+        lake_root=lake_root,
+        partition_key=partition_key,
+        partition_path=lambda root, key: option_snapshot_partition_path(
+            lake_root=root,
+            key=cast(OptionPartitionKey, key),
+        ),
+        record_builder=options_ticker_snapshot_record,
+        natural_key=_option_snapshot_natural_key,
+        sort_key=_option_snapshot_sort_key,
+        staging_name=lambda records: f".staging-{records[0]['run_id']}.parquet",
+    )
 
 
 def option_ticker_snapshot_record(row: OptionTickerSnapshotRow) -> dict[str, object]:
