@@ -323,8 +323,26 @@ def build_parser(config: Config | None = None) -> argparse.ArgumentParser:
     option_l2_parser.add_argument(
         "--depth",
         type=int,
-        default=config_int(option_l2_config, "depth", 20),
+        default=config_int(option_l2_config, "depth", 50),
         help="Number of order-book levels per side to request for each option",
+    )
+    option_l2_parser.add_argument(
+        "--snapshot-count",
+        type=int,
+        default=config_int(option_l2_config, "snapshot_count", 5),
+        help="Polling ticks to collect for each selected option instrument",
+    )
+    option_l2_parser.add_argument(
+        "--poll-interval-s",
+        type=float,
+        default=config_float(option_l2_config, "poll_interval_s", 10.0),
+        help="Sleep interval between option L2 polling ticks",
+    )
+    option_l2_parser.add_argument(
+        "--max-runtime-s",
+        type=float,
+        default=config_float(option_l2_config, "max_runtime_s", 50.0),
+        help="Maximum option L2 collection runtime in seconds; 0 disables the budget",
     )
     _lake_root_flag(option_l2_parser, option_l2_config)
     option_l2_parser.add_argument(

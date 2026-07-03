@@ -9,7 +9,7 @@ from typing import cast
 from ingestion.lake_writer import upsert_partitioned_records
 from ingestion.option_l2 import OptionL2SnapshotRow
 
-OptionL2PartitionKey = tuple[str, str, str, str, str, int, str, str, str, str, str]
+OptionL2PartitionKey = tuple[str, str, str, str, int, str, str, str, str, str]
 OptionL2NaturalKey = tuple[str, str, str, int, datetime]
 
 
@@ -20,8 +20,7 @@ def option_l2_partition_path(lake_root: str, key: OptionL2PartitionKey) -> Path:
         dataset_type,
         exchange,
         instrument_type,
-        currency,
-        instrument_name,
+        symbol,
         depth,
         source,
         year_partition,
@@ -34,8 +33,7 @@ def option_l2_partition_path(lake_root: str, key: OptionL2PartitionKey) -> Path:
         / f"dataset_type={dataset_type}"
         / f"exchange={exchange}"
         / f"instrument_type={instrument_type}"
-        / f"currency={currency}"
-        / f"instrument_name={instrument_name}"
+        / f"symbol={symbol}"
         / f"depth={depth}"
         / f"source={source}"
         / f"year={year_partition}"
@@ -52,19 +50,21 @@ def option_l2_snapshot_record(row: OptionL2SnapshotRow) -> dict[str, object]:
         "schema_version": row.schema_version,
         "dataset_type": row.dataset_type,
         "exchange": row.exchange,
-        "source": row.source,
-        "currency": row.currency,
-        "instrument_name": row.instrument_name,
+        "symbol": row.instrument_name,
         "instrument_type": row.instrument_type,
-        "snapshot_time": row.snapshot_time,
-        "exchange_timestamp": row.exchange_timestamp,
+        "event_time": row.exchange_timestamp,
         "ingested_at": row.ingested_at,
         "run_id": row.run_id,
+        "source": row.source,
         "depth": row.depth,
         "fetch_duration_s": row.fetch_duration_s,
-        "state": row.state,
         "bids": row.bids,
         "asks": row.asks,
+        "currency": row.currency,
+        "instrument_name": row.instrument_name,
+        "snapshot_time": row.snapshot_time,
+        "exchange_timestamp": row.exchange_timestamp,
+        "state": row.state,
         "bid_levels": row.bid_levels,
         "ask_levels": row.ask_levels,
         "best_bid_price": row.best_bid_price,
@@ -99,26 +99,26 @@ def option_l2_snapshot_record(row: OptionL2SnapshotRow) -> dict[str, object]:
 
 
 def _natural_key(record: dict[str, object]) -> OptionL2NaturalKey:
-    exchange_timestamp = record["exchange_timestamp"]
-    if not isinstance(exchange_timestamp, datetime):
-        raise ValueError("exchange_timestamp must be datetime")
+    event_time = record["event_time"]
+    if not isinstance(event_time, datetime):
+        raise ValueError("event_time must be datetime")
     depth = record["depth"]
     if not isinstance(depth, int):
         raise ValueError("depth must be int")
     return (
         str(record["exchange"]),
-        str(record["instrument_name"]),
+        str(record["symbol"]),
         str(record["source"]),
         depth,
-        exchange_timestamp,
+        event_time,
     )
 
 
 def _sort_key(record: dict[str, object]) -> str:
-    exchange_timestamp = record["exchange_timestamp"]
-    if not isinstance(exchange_timestamp, datetime):
-        raise ValueError("exchange_timestamp must be datetime")
-    return f"{exchange_timestamp.isoformat()}|{record['instrument_name']}"
+    event_time = record["event_time"]
+    if not isinstance(event_time, datetime):
+        raise ValueError("event_time must be datetime")
+    return f"{event_time.isoformat()}|{record['symbol']}"
 
 
 def save_option_l2_snapshot_parquet_lake(rows: list[OptionL2SnapshotRow], lake_root: str) -> list[str]:
@@ -130,7 +130,6 @@ def save_option_l2_snapshot_parquet_lake(rows: list[OptionL2SnapshotRow], lake_r
             row.exchange,
             row.instrument_type,
             row.currency,
-            row.instrument_name,
             row.depth,
             row.source,
             row.snapshot_time.strftime("%Y"),

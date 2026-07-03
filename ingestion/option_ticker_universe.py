@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
 DEFAULT_TARGET_TENORS_DAYS = (1, 2, 7, 14, 30, 60)
+OPTION_L2_TARGET_DTE_DAYS = (1, 3, 7, 14, 30, 60, 90, 180, 365)
 DEFAULT_TARGET_MONEYNESS = (0.9, 0.95, 1.0, 1.05, 1.1)
 OPTION_TYPES = ("C", "P")
 
@@ -28,6 +29,9 @@ def select_option_ticker_prediction_universe(
     *,
     max_instruments: int,
     today: date | None = None,
+    target_tenors_days: tuple[int, ...] | None = None,
+    require_exact_target_tenor: bool = False,
+    allow_liquidity_fallback: bool = True,
 ) -> list[str]:
     """Select a liquid, tenor/moneyness-diverse option ticker universe.
 
@@ -38,12 +42,18 @@ def select_option_ticker_prediction_universe(
         rows (list[dict[str, object]]): Raw Deribit book-summary rows for one requested currency.
         max_instruments (int): Maximum instruments to select for the currency.
         today (date | None): UTC date used for deterministic tenor calculations.
+        target_tenors_days (tuple[int, ...] | None): DTE buckets used to reserve maturity coverage.
+        require_exact_target_tenor (bool): When true, reject candidates outside the target DTE set.
+        allow_liquidity_fallback (bool): When true, fill unused capacity with liquid remaining contracts.
 
     Returns:
         list[str]: Selected instrument names ordered by model-priority buckets.
     """
 
     if max_instruments <= 0:
+        return []
+    target_tenors = DEFAULT_TARGET_TENORS_DAYS if target_tenors_days is None else target_tenors_days
+    if not target_tenors:
         return []
 
     reference_date = today or datetime.now(UTC).date()
@@ -61,7 +71,7 @@ def select_option_ticker_prediction_universe(
     # caps still reserve coverage across all IV/RV forecast tenors.
     for target_moneyness in DEFAULT_TARGET_MONEYNESS:
         for option_type in OPTION_TYPES:
-            for target_tenor in DEFAULT_TARGET_TENORS_DAYS:
+            for target_tenor in target_tenors:
                 _append_best_bucket_candidate(
                     candidates=candidates,
                     selected=selected,
@@ -69,16 +79,19 @@ def select_option_ticker_prediction_universe(
                     target_tenor=target_tenor,
                     target_moneyness=target_moneyness,
                     option_type=option_type,
+                    require_exact_target_tenor=require_exact_target_tenor,
                 )
                 if len(selected) >= max_instruments:
                     return [candidate.instrument_name for candidate in selected]
 
     if len(selected) >= max_instruments:
         return [candidate.instrument_name for candidate in selected]
+    if not allow_liquidity_fallback:
+        return [candidate.instrument_name for candidate in selected]
 
     # If the full bucket grid did not fill the cap, use the most liquid
     # remaining contracts as fallback without disturbing already-covered tenors.
-    for target_tenor in DEFAULT_TARGET_TENORS_DAYS:
+    for target_tenor in target_tenors:
         for target_moneyness in DEFAULT_TARGET_MONEYNESS:
             for option_type in OPTION_TYPES:
                 _append_best_bucket_candidate(
@@ -88,6 +101,7 @@ def select_option_ticker_prediction_universe(
                     target_tenor=target_tenor,
                     target_moneyness=target_moneyness,
                     option_type=option_type,
+                    require_exact_target_tenor=require_exact_target_tenor,
                 )
                 if len(selected) >= max_instruments:
                     return [candidate.instrument_name for candidate in selected]
@@ -111,6 +125,7 @@ def _append_best_bucket_candidate(
     target_tenor: int,
     target_moneyness: float,
     option_type: str,
+    require_exact_target_tenor: bool,
 ) -> None:
     candidate = _best_bucket_candidate(
         candidates=candidates,
@@ -118,6 +133,7 @@ def _append_best_bucket_candidate(
         target_tenor=target_tenor,
         target_moneyness=target_moneyness,
         option_type=option_type,
+        require_exact_target_tenor=require_exact_target_tenor,
     )
     if candidate is None:
         return
@@ -132,11 +148,13 @@ def _best_bucket_candidate(
     target_tenor: int,
     target_moneyness: float,
     option_type: str,
+    require_exact_target_tenor: bool,
 ) -> OptionTickerCandidate | None:
     bucket_candidates = [
         candidate
         for candidate in candidates
         if candidate.option_type == option_type and candidate.instrument_name not in used
+        if not require_exact_target_tenor or candidate.tenor_days == target_tenor
     ]
     if not bucket_candidates:
         return None
