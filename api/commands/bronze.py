@@ -7,7 +7,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
-from time import perf_counter
+from time import monotonic, perf_counter, sleep
 from typing import TypeAlias, cast
 
 from api.commands.runtime import (
@@ -106,7 +106,10 @@ from ingestion.option_l2 import (
     utc_run_id as option_l2_utc_run_id,
 )
 from ingestion.option_l2_lake import save_option_l2_snapshot_parquet_lake
-from ingestion.option_ticker_universe import select_option_ticker_prediction_universe
+from ingestion.option_ticker_universe import (
+    OPTION_L2_TARGET_DTE_DAYS,
+    select_option_ticker_prediction_universe,
+)
 from ingestion.options import (
     OPTION_TICKER_DATASET_TYPE,
     OptionTickerSnapshotRow,
@@ -305,6 +308,58 @@ def _fetch_option_l2_rows_for_instruments(
             fetch_durations_s[instrument_name] = perf_counter() - started_at
             errors[instrument_name] = str(exc)
     return rows_by_instrument, fetch_durations_s, errors
+
+
+def _fetch_option_l2_snapshot_ticks_for_instruments(
+    instruments: list[str],
+    *,
+    depth: int,
+    snapshot_count: int,
+    poll_interval_s: float,
+    max_runtime_s: float,
+) -> tuple[dict[str, dict[str, object]], dict[str, float], dict[str, str]]:
+    """Collect option L2 snapshots using the same bounded polling pattern as perp L2."""
+
+    if snapshot_count <= 0:
+        raise ValueError("snapshot_count must be positive")
+    if poll_interval_s < 0:
+        raise ValueError("poll_interval_s must be >= 0")
+    if max_runtime_s < 0:
+        raise ValueError("max_runtime_s must be >= 0")
+
+    deadline = monotonic() + max_runtime_s if max_runtime_s > 0 else None
+    rows_by_capture: dict[str, dict[str, object]] = {}
+    fetch_durations_s: dict[str, float] = {}
+    errors: dict[str, str] = {}
+
+    for tick_index in range(snapshot_count):
+        if deadline is not None and monotonic() >= deadline:
+            break
+
+        tick_rows, tick_durations, tick_errors = _fetch_option_l2_rows_for_instruments(
+            instruments=instruments,
+            depth=depth,
+        )
+        for instrument_name, row in tick_rows.items():
+            capture_key = f"{instrument_name}#{tick_index}"
+            rows_by_capture[capture_key] = row
+            fetch_durations_s[capture_key] = tick_durations.get(instrument_name, 0.0)
+        for instrument_name, error in tick_errors.items():
+            errors[f"{instrument_name}#{tick_index}"] = error
+
+        if tick_index >= snapshot_count - 1 or poll_interval_s <= 0:
+            continue
+
+        if deadline is None:
+            sleep(poll_interval_s)
+            continue
+
+        remaining_s = deadline - monotonic()
+        if remaining_s <= 0:
+            break
+        sleep(min(poll_interval_s, remaining_s))
+
+    return rows_by_capture, fetch_durations_s, errors
 
 
 def _fetch_recent_trade_rows_for_requests(
@@ -811,6 +866,9 @@ def _select_option_ticker_prediction_universe_by_currency(
     currencies: list[str],
     explicit_instruments: list[str],
     max_instruments_per_currency: int,
+    target_tenors_days: tuple[int, ...] | None = None,
+    require_exact_target_tenor: bool = False,
+    allow_liquidity_fallback: bool = True,
 ) -> tuple[dict[str, list[str]], list[str]]:
     """Return explicit or summary-selected option instruments grouped by requested currency."""
 
@@ -827,6 +885,9 @@ def _select_option_ticker_prediction_universe_by_currency(
             instruments_by_currency[currency] = select_option_ticker_prediction_universe(
                 rows,
                 max_instruments=max_instruments_per_currency,
+                target_tenors_days=target_tenors_days,
+                require_exact_target_tenor=require_exact_target_tenor,
+                allow_liquidity_fallback=allow_liquidity_fallback,
             )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{currency}: {exc}")
@@ -864,6 +925,9 @@ def _run_option_l2_bronze_builder(
     depth = int(args.depth)
     if depth <= 0:
         raise ValueError("depth must be positive")
+    requested_snapshots = int(args.snapshot_count)
+    poll_interval_s = float(args.poll_interval_s)
+    max_runtime_s = float(args.max_runtime_s)
     max_instruments_per_currency = max(1, int(args.max_instruments_per_run))
     _log_dataset_debug_event(
         logger,
@@ -875,14 +939,26 @@ def _run_option_l2_bronze_builder(
         explicit_instruments=len(explicit_instruments),
         lake_root=cast(str, args.lake_root),
         max_instruments_per_currency=max_instruments_per_currency,
+        max_runtime_s=max_runtime_s,
+        poll_interval_s=poll_interval_s,
         save_parquet_lake=bool(args.save_parquet_lake),
         schema_version=cast(str, args.schema_version),
+        snapshot_count=requested_snapshots,
         source=cast(str, args.source),
+    )
+    _warn_for_long_poll_schedule(
+        logger=logger,
+        snapshot_count=requested_snapshots,
+        poll_interval_s=poll_interval_s,
+        max_runtime_s=max_runtime_s,
     )
     instruments_by_currency, discovery_errors = _select_option_ticker_prediction_universe_by_currency(
         currencies=currencies,
         explicit_instruments=explicit_instruments,
         max_instruments_per_currency=max_instruments_per_currency,
+        target_tenors_days=OPTION_L2_TARGET_DTE_DAYS,
+        require_exact_target_tenor=True,
+        allow_liquidity_fallback=False,
     )
     run_id = option_l2_utc_run_id()
     snapshot_time = option_l2_snapshot_time_floor_minute()
@@ -907,9 +983,12 @@ def _run_option_l2_bronze_builder(
         snapshot_time=snapshot_time.isoformat().replace("+00:00", "Z"),
     )
 
-    raw_rows_by_instrument, fetch_durations_s, fetch_errors = _fetch_option_l2_rows_for_instruments(
+    raw_rows_by_instrument, fetch_durations_s, fetch_errors = _fetch_option_l2_snapshot_ticks_for_instruments(
         instruments=instruments,
         depth=depth,
+        snapshot_count=requested_snapshots,
+        poll_interval_s=poll_interval_s,
+        max_runtime_s=max_runtime_s,
     )
     _log_dataset_debug_event(
         logger,
@@ -919,6 +998,7 @@ def _run_option_l2_bronze_builder(
         depth=depth,
         fetch_errors=len(fetch_errors),
         instruments_requested=len(instruments),
+        snapshots_requested=requested_snapshots * len(instruments),
         raw_rows=len(raw_rows_by_instrument),
         slowest_fetch_s=max(fetch_durations_s.values(), default=0.0),
     )
@@ -978,8 +1058,10 @@ def _run_option_l2_bronze_builder(
         "snapshot_time": snapshot_time.isoformat().replace("+00:00", "Z"),
         "requested_currencies": currencies,
         "depth": depth,
+        "snapshot_count": requested_snapshots,
         "instruments_discovered": instruments_discovered,
         "instruments_requested": len(instruments),
+        "snapshots_requested": requested_snapshots * len(instruments),
         "currency_results": currency_results,
         "rows_written": len(rows),
         "output_files": output_files,
@@ -1002,6 +1084,7 @@ def _run_option_l2_bronze_builder(
         rows_written=len(rows),
         run_id=run_id,
         snapshot_time=output["snapshot_time"],
+        snapshots_requested=output["snapshots_requested"],
         status="complete" if not errors else "partial",
     )
 

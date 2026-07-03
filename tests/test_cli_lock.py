@@ -223,6 +223,17 @@ def test_l2_parser_defaults_to_five_snapshots_per_run() -> None:
     assert args.max_runtime_s == 50.0
 
 
+def test_option_l2_parser_defaults_to_perp_l2_polling_cadence() -> None:
+    """Verify option L2 defaults use the same depth and polling cadence as perpetual L2."""
+
+    args = cli.build_parser().parse_args([OPTION_L2_BRONZE_BUILDER_COMMAND])
+
+    assert args.depth == 50
+    assert args.snapshot_count == 5
+    assert args.poll_interval_s == 10.0
+    assert args.max_runtime_s == 50.0
+
+
 def test_job_event_logs_use_uniform_key_value_shape(caplog: pytest.LogCaptureFixture) -> None:
     """Verify CLI job logs use one event envelope and stable key ordering."""
 

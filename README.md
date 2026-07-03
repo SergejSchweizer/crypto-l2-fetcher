@@ -240,7 +240,7 @@ python main.py instrument-metadata-bronze-builder --debug --symbols BTC ETH SOL 
 python main.py options-bronze-builder --debug --symbols BTC ETH SOL --save-parquet-lake
 python main.py futures-summary-bronze-builder --debug --symbols BTC ETH SOL
 python main.py option-instrument-ticker-bronze-builder --debug --symbols BTC ETH SOL --max-instruments-per-run 60
-python main.py options-l2-bronze-builder --debug --symbols BTC ETH SOL --depth 20 --max-instruments-per-run 60
+python main.py options-l2-bronze-builder --debug --symbols BTC ETH SOL --depth 50 --max-instruments-per-run 60
 python main.py recent-trades-bronze-builder --debug --symbols BTC ETH SOL --kinds option future --count 1000
 python main.py index-price-bronze-builder --debug --symbols btc_usd eth_usd sol_usdc
 python main.py volatility-index-bronze-builder --debug --symbols BTC ETH SOL --resolution 60
@@ -422,15 +422,20 @@ Endpoint: `GET /api/v2/public/get_order_book?instrument_name=<option instrument>
 Default command:
 
 ```bash
-python main.py options-l2-bronze-builder --debug --symbols BTC ETH SOL --depth 20 --max-instruments-per-run 60
+python main.py options-l2-bronze-builder --debug --symbols BTC ETH SOL --depth 50 --max-instruments-per-run 60
 ```
 
 Selection policy:
 
 - Reuses the option ticker prediction universe selection from current option summaries.
+- Targets DTE maturity buckets `1D`, `3D`, `7D`, `14D`, `30D`, `60D`, `90D`, `180D`, and
+  `365D`.
+- Does not use liquidity fallback contracts outside those target DTE maturities.
 - Supports explicit `--instruments` for deterministic targeted captures.
-- Fetches sequentially and records per-instrument `fetch_duration_s` for debugging slow REST calls.
-- Persists the requested `depth` in both row data and partition layout.
+- Fetches selected instruments sequentially on bounded polling ticks, using the same
+  `--snapshot-count`, `--poll-interval-s`, and `--max-runtime-s` control pattern as the perpetual
+  L2 collector.
+- Persists the requested `depth` in both row data and the perpetual-L2-style partition layout.
 - Keeps raw `bids` and `asks` as price/amount level arrays without reconstructing a surface.
 
 Coverage contract:
@@ -441,14 +446,15 @@ Coverage contract:
 | Live endpoint owner | `crypto-live-loader` only |
 | Assets | BTC, ETH, SOL |
 | SOL endpoint mapping | Fetch Deribit `USDC` option summaries and keep `SOL_USDC-*` instruments |
-| Fetch mode | Sequential, bounded per run, no parallel REST fan-out |
-| Operational default | `20` book levels for up to `60` instruments per currency per minute |
+| Fetch mode | Sequential polling ticks, bounded per run, no parallel REST fan-out |
+| Operational default | `50` book levels for `5` polling ticks, `10s` between ticks, and up to `60` instruments per currency per minute |
 
 Key fields:
 
 | Column | Market Meaning |
 |---|---|
-| `instrument_name`, `snapshot_time`, `exchange_timestamp` | Contract identity, capture time, and Deribit order-book timestamp |
+| `symbol`, `event_time` | Contract identity and Deribit order-book timestamp, matching perpetual L2 naming |
+| `instrument_name`, `snapshot_time`, `exchange_timestamp` | Option-native aliases and run capture time retained for option joins |
 | `depth`, `bids`, `asks`, `bid_levels`, `ask_levels` | Requested and observed book depth per side |
 | `best_bid_price`, `best_ask_price`, `best_bid_amount`, `best_ask_amount` | Top-of-book quote state |
 | `bid_iv`, `ask_iv`, `mark_iv`, `underlying_price`, `index_price` | IV/RV alignment context from the order-book payload |
@@ -649,13 +655,13 @@ Bronze root:
 ```text
 lake/bronze/
   dataset_type=perps_l2_snapshot_1m/
-    exchange=<exchange>/instrument_type=perp/symbol=<symbol>/depth=<depth>/source=<source>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
+    exchange=<exchange>/instrument_type=perp/symbol=<symbol>/depth=<depth>/source=rest_order_book/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=options_ticker_snapshot_1m/
     exchange=<exchange>/instrument_type=option/currency=<currency>/source=<source>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=option_instrument_ticker_snapshot_1m/
     exchange=<exchange>/instrument_type=option/currency=<currency>/instrument_name=<instrument_name>/source=<source>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=options_l2_snapshot_1m/
-    exchange=<exchange>/instrument_type=option/currency=<currency>/instrument_name=<instrument_name>/depth=<depth>/source=<source>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
+    exchange=<exchange>/instrument_type=option/symbol=<currency>/depth=<depth>/source=rest_order_book/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=instrument_metadata_snapshot_daily/
     exchange=<exchange>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=future_instrument_metadata_snapshot_daily/
@@ -729,7 +735,7 @@ python main.py perp-l2-bronze-builder --debug --symbols BTC ETH SOL --save-parqu
 python main.py options-bronze-builder --debug --symbols BTC ETH SOL --save-parquet-lake
 python main.py futures-summary-bronze-builder --debug --symbols BTC ETH SOL
 python main.py option-instrument-ticker-bronze-builder --debug --symbols BTC ETH SOL --max-instruments-per-run 60
-python main.py options-l2-bronze-builder --debug --symbols BTC ETH SOL --depth 20 --max-instruments-per-run 60
+python main.py options-l2-bronze-builder --debug --symbols BTC ETH SOL --depth 50 --max-instruments-per-run 60
 python main.py recent-trades-bronze-builder --debug --symbols BTC ETH SOL --kinds option future --count 1000
 python main.py instrument-metadata-bronze-builder --debug --symbols BTC ETH SOL --kind option
 python main.py instrument-metadata-bronze-builder --debug --symbols BTC ETH SOL --kind future
@@ -750,7 +756,7 @@ python main.py validate-symbols --debug --symbols BTC ETH SOL
 * * * * * cd /home/vcs/git/crypto-live-loader && .venv/bin/python main.py options-bronze-builder --debug --symbols BTC ETH SOL
 * * * * * cd /home/vcs/git/crypto-live-loader && .venv/bin/python main.py futures-summary-bronze-builder --debug --symbols BTC ETH SOL
 * * * * * cd /home/vcs/git/crypto-live-loader && flock -n .logs/option-instrument-ticker-bronze-builder.cron.lock .venv/bin/python main.py option-instrument-ticker-bronze-builder --debug --symbols BTC ETH SOL --max-instruments-per-run 60
-* * * * * cd /home/vcs/git/crypto-live-loader && flock -n .logs/options-l2-bronze-builder.cron.lock .venv/bin/python main.py options-l2-bronze-builder --debug --symbols BTC ETH SOL --depth 20 --max-instruments-per-run 60
+* * * * * cd /home/vcs/git/crypto-live-loader && flock -n .logs/options-l2-bronze-builder.cron.lock .venv/bin/python main.py options-l2-bronze-builder --debug --symbols BTC ETH SOL --depth 50 --max-instruments-per-run 60
 * * * * * cd /home/vcs/git/crypto-live-loader && flock -n .logs/recent-trades-bronze-builder.cron.lock .venv/bin/python main.py recent-trades-bronze-builder --debug --symbols BTC ETH SOL --kinds option future --count 1000
 * * * * * cd /home/vcs/git/crypto-live-loader && .venv/bin/python main.py index-price-bronze-builder --debug --symbols btc_usd eth_usd sol_usdc
 * * * * * cd /home/vcs/git/crypto-live-loader && .venv/bin/python main.py volatility-index-bronze-builder --debug --symbols BTC ETH SOL --resolution 60
@@ -808,7 +814,7 @@ Upsert-based datasets merge by natural keys and deterministic sort order:
 | `perps_l2_snapshot_1m` | `exchange`, `instrument_type`, `symbol`, `depth`, `source`, `event_time` |
 | `options_ticker_snapshot_1m` | `exchange`, `currency`, `instrument_name`, `source`, `snapshot_time` |
 | `option_instrument_ticker_snapshot_1m` | `exchange`, `instrument_name`, `source`, `snapshot_time` |
-| `options_l2_snapshot_1m` | `exchange`, `instrument_name`, `source`, `depth`, `exchange_timestamp` |
+| `options_l2_snapshot_1m` | `exchange`, `symbol`, `source`, `depth`, `event_time` |
 | `instrument_metadata_snapshot_daily` | `exchange`, `instrument_name`, `snapshot_date` |
 | `future_instrument_metadata_snapshot_daily` | `exchange`, `instrument_name`, `snapshot_date` |
 | `index_price_snapshot_1m` | `exchange`, `index_name`, `event_time`, `source` |

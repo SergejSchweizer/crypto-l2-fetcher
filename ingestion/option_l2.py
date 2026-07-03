@@ -28,7 +28,7 @@ from ingestion.normalization import (
 
 OPTION_L2_DATASET_TYPE = "options_l2_snapshot_1m"
 OPTION_L2_SCHEMA_VERSION = "v1"
-OPTION_L2_SOURCE = "rest_get_order_book"
+OPTION_L2_SOURCE = "rest_order_book"
 snapshot_time_floor_minute = _normalization.snapshot_time_floor_minute
 utc_run_id = _normalization.utc_run_id
 

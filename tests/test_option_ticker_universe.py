@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from ingestion.option_ticker_universe import select_option_ticker_prediction_universe
+from ingestion.option_ticker_universe import (
+    OPTION_L2_TARGET_DTE_DAYS,
+    select_option_ticker_prediction_universe,
+)
 
 
 def _summary_row(
@@ -84,6 +87,60 @@ def test_select_option_ticker_prediction_universe_reserves_target_tenors() -> No
     )
 
     assert selected_tenors == [1, 2, 7, 14, 30, 60]
+
+
+def test_select_option_ticker_prediction_universe_supports_option_l2_target_dtes() -> None:
+    """Verify option L2 can reserve the configured DTE target maturities."""
+
+    rows = [
+        _summary_row("BTC-13JUN26-100000-C"),
+        _summary_row("BTC-15JUN26-100000-C"),
+        _summary_row("BTC-19JUN26-100000-C"),
+        _summary_row("BTC-26JUN26-100000-C"),
+        _summary_row("BTC-12JUL26-100000-C"),
+        _summary_row("BTC-11AUG26-100000-C"),
+        _summary_row("BTC-10SEP26-100000-C"),
+        _summary_row("BTC-09DEC26-100000-C"),
+        _summary_row("BTC-12JUN27-100000-C"),
+    ]
+
+    selected = select_option_ticker_prediction_universe(
+        rows,
+        max_instruments=9,
+        today=date(2026, 6, 12),
+        target_tenors_days=OPTION_L2_TARGET_DTE_DAYS,
+    )
+
+    selected_tenors = sorted(
+        {
+            (datetime.strptime(instrument_name.split("-")[1], "%d%b%y").date() - date(2026, 6, 12)).days
+            for instrument_name in selected
+        }
+    )
+
+    assert selected_tenors == list(OPTION_L2_TARGET_DTE_DAYS)
+
+
+def test_select_option_ticker_prediction_universe_can_restrict_to_exact_target_dtes() -> None:
+    """Verify exact-DTE selection excludes maturities outside the configured target set."""
+
+    rows = [
+        _summary_row("BTC-13JUN26-100000-C"),
+        _summary_row("BTC-14JUN26-100000-C"),
+        _summary_row("BTC-15JUN26-100000-C"),
+        _summary_row("BTC-16JUN26-100000-C"),
+    ]
+
+    selected = select_option_ticker_prediction_universe(
+        rows,
+        max_instruments=10,
+        today=date(2026, 6, 12),
+        target_tenors_days=(1, 3),
+        require_exact_target_tenor=True,
+        allow_liquidity_fallback=False,
+    )
+
+    assert selected == ["BTC-13JUN26-100000-C", "BTC-15JUN26-100000-C"]
 
 
 def test_select_option_ticker_prediction_universe_uses_nearest_listed_expiry() -> None:
