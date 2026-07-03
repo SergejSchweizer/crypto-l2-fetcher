@@ -5,11 +5,11 @@ from __future__ import annotations
 import argparse
 import logging
 from collections.abc import Callable
-from dataclasses import asdict
 from datetime import UTC, datetime
 from time import monotonic, perf_counter, sleep
 from typing import TypeAlias, cast
 
+from api.commands import perps_l2
 from api.commands.runtime import (
     DatasetCommandResult,
     emit_dataset_command_result,
@@ -80,7 +80,7 @@ from ingestion.instrument_metadata import (
     utc_run_id as instrument_utc_run_id,
 )
 from ingestion.instrument_metadata_lake import save_instrument_metadata_snapshot_parquet_lake
-from ingestion.l2 import PERPS_L2_DATASET_TYPE, L2Snapshot, fetch_perps_l2_snapshot_1m_for_symbols
+from ingestion.l2 import L2Snapshot, fetch_perps_l2_snapshot_1m_for_symbols
 from ingestion.lake import save_perps_l2_snapshot_1m_parquet_lake
 from ingestion.option_instrument_ticker import (
     OPTION_INSTRUMENT_TICKER_DATASET_TYPE,
@@ -184,17 +184,6 @@ def _enable_debug_logging(args: argparse.Namespace, logger: logging.Logger) -> N
     logger.setLevel(logging.DEBUG)
     for handler in logger.handlers:
         handler.setLevel(logging.DEBUG)
-
-
-def _serialize_perps_l2_snapshot_1m(item: L2Snapshot) -> dict[str, object]:
-    """Convert an L2 snapshot into a JSON-safe output dictionary."""
-
-    data = asdict(item)
-    timestamp = data["timestamp"]
-    if not hasattr(timestamp, "isoformat"):
-        raise ValueError("timestamp must be datetime-like")
-    data["timestamp"] = timestamp.isoformat()
-    return data
 
 
 def _normalize_cli_symbols(values: list[str]) -> list[str]:
@@ -391,130 +380,6 @@ def _recent_trade_scope_key(currency: str, kind: str) -> str:
     return f"{currency.strip().upper()}:{kind.strip().lower()}"
 
 
-def _log_bronze_builder_summary(
-    logger: logging.Logger,
-    exchange: str,
-    symbols: list[str],
-    snapshots_by_symbol: dict[str, list[L2Snapshot]],
-    requested_snapshots: int,
-    parquet_files: list[str],
-    elapsed_s: float,
-    parquet_error: str | None = None,
-) -> None:
-    """Write a compact run-level bronze-builder summary."""
-
-    collected_total = sum(len(snapshots_by_symbol.get(symbol.upper(), [])) for symbol in symbols)
-    requested_total = requested_snapshots * len(symbols)
-    status = "partial" if collected_total < requested_total else "complete"
-    if parquet_error is not None:
-        status = "parquet_error"
-    _log_dataset_event(
-        logger,
-        logging.INFO,
-        BRONZE_BUILDER_COMMAND,
-        "run_summary",
-        dataset_type=PERPS_L2_DATASET_TYPE,
-        elapsed_s=elapsed_s,
-        errors=1 if parquet_error is not None else 0,
-        exchange=exchange,
-        parquet_error=parquet_error,
-        parquet_files=len(parquet_files),
-        snapshots_collected=collected_total,
-        snapshots_requested=requested_total,
-        status=status,
-        symbols=[symbol.upper() for symbol in symbols],
-    )
-
-
-def _build_snapshot_output(
-    exchange: str,
-    symbols: list[str],
-    snapshots_by_symbol: SnapshotsBySymbol,
-    requested_snapshots: int,
-    logger: logging.Logger,
-) -> dict[str, object]:
-    """Build JSON output for raw bronze snapshots and log per-symbol collection status."""
-
-    output: dict[str, object] = {exchange: {}}
-    exchange_output = cast(dict[str, object], output[exchange])
-
-    for symbol in symbols:
-        symbol_key = symbol.upper()
-        snapshots = snapshots_by_symbol.get(symbol_key, [])
-        _log_partial_snapshot_warning(
-            logger=logger,
-            symbol=symbol_key,
-            collected_snapshots=len(snapshots),
-            requested_snapshots=requested_snapshots,
-        )
-        exchange_output[symbol_key] = [_serialize_perps_l2_snapshot_1m(item) for item in snapshots]
-        _log_dataset_event(
-            logger,
-            logging.INFO,
-            BRONZE_BUILDER_COMMAND,
-            "snapshot_stats",
-            dataset_type=PERPS_L2_DATASET_TYPE,
-            exchange=exchange,
-            snapshots_collected=len(snapshots),
-            snapshots_requested=requested_snapshots,
-            symbol=symbol_key,
-        )
-
-    return output
-
-
-def _log_partial_snapshot_warning(
-    logger: logging.Logger,
-    symbol: str,
-    collected_snapshots: int,
-    requested_snapshots: int,
-) -> None:
-    """Log a warning when the run collected fewer snapshots than requested."""
-
-    if collected_snapshots >= requested_snapshots:
-        return
-    logger.warning(
-        "bronze-builder collected partial snapshots symbol=%s collected=%s requested=%s",
-        symbol,
-        collected_snapshots,
-        requested_snapshots,
-    )
-
-
-def _persist_bronze_snapshots(
-    snapshots_by_symbol: SnapshotsBySymbol,
-    lake_root: str,
-    depth: int,
-    enabled: bool,
-    output: dict[str, object],
-    logger: logging.Logger,
-) -> tuple[list[str], str | None]:
-    """Persist raw L2 snapshots when requested and annotate the CLI output."""
-
-    if not enabled:
-        return [], None
-
-    try:
-        parquet_files = save_perps_l2_snapshot_1m_parquet_lake(
-            snapshots_by_symbol=snapshots_by_symbol,
-            lake_root=lake_root,
-            depth=depth,
-        )
-        output["_parquet_files"] = parquet_files
-        return parquet_files, None
-    except Exception as exc:  # noqa: BLE001
-        parquet_error = str(exc)
-        output["_parquet_error"] = parquet_error
-        logger.exception("bronze-builder raw snapshot parquet write failed")
-        return [], parquet_error
-
-
-def _estimated_poll_runtime_s(snapshot_count: int, poll_interval_s: float) -> float:
-    """Estimate runtime spent sleeping between polling ticks."""
-
-    return max(0, snapshot_count - 1) * poll_interval_s
-
-
 def _warn_for_long_poll_schedule(
     logger: logging.Logger,
     snapshot_count: int,
@@ -523,104 +388,24 @@ def _warn_for_long_poll_schedule(
 ) -> None:
     """Warn when bronze-builder polling settings are likely to collide with minute cron runs."""
 
-    estimated_s = _estimated_poll_runtime_s(snapshot_count=snapshot_count, poll_interval_s=poll_interval_s)
-    if max_runtime_s > 0 and estimated_s >= max_runtime_s:
-        logger.warning(
-            "bronze-builder polling sleep budget may exceed max runtime estimated_sleep_s=%.3f max_runtime_s=%.3f",
-            estimated_s,
-            max_runtime_s,
-        )
-    if estimated_s >= 60:
-        logger.warning(
-            "bronze-builder polling sleep budget is at least one minute estimated_sleep_s=%.3f; cron runs may overlap",
-            estimated_s,
-        )
+    perps_l2.warn_for_long_poll_schedule(
+        logger=logger,
+        snapshot_count=snapshot_count,
+        poll_interval_s=poll_interval_s,
+        max_runtime_s=max_runtime_s,
+    )
 
 
 def _run_bronze_builder(args: argparse.Namespace, logger: logging.Logger, config: Config) -> None:
     """Run L2 snapshot collection and optional raw bronze persistence."""
 
-    started_at = perf_counter()
-    exchange = cast(str, args.exchange)
-    symbols = _normalize_cli_symbols(cast(list[str], args.symbols))
-    requested_snapshots = int(args.snapshot_count)
-    max_runtime_s = float(args.max_runtime_s)
-    _log_dataset_debug_event(
-        logger,
-        BRONZE_BUILDER_COMMAND,
-        "run_start",
-        dataset_type=PERPS_L2_DATASET_TYPE,
-        exchange=exchange,
-        depth=int(args.levels),
-        lake_root=cast(str, args.lake_root),
-        max_runtime_s=max_runtime_s,
-        poll_interval_s=float(args.poll_interval_s),
-        save_parquet_lake=bool(args.save_parquet_lake),
-        snapshot_count=requested_snapshots,
-        symbols=symbols,
-    )
-    _warn_for_long_poll_schedule(
+    _ = config
+    perps_l2.run_bronze_builder(
+        args=args,
         logger=logger,
-        snapshot_count=requested_snapshots,
-        poll_interval_s=float(args.poll_interval_s),
-        max_runtime_s=max_runtime_s,
-    )
-    snapshots_by_symbol = fetch_perps_l2_snapshot_1m_for_symbols(
-        exchange=exchange,
-        symbols=symbols,
-        depth=int(args.levels),
-        snapshot_count=requested_snapshots,
-        poll_interval_s=float(args.poll_interval_s),
-        max_runtime_s=max_runtime_s if max_runtime_s > 0 else None,
-    )
-    _log_dataset_debug_event(
-        logger,
-        BRONZE_BUILDER_COMMAND,
-        "collection_complete",
-        dataset_type=PERPS_L2_DATASET_TYPE,
-        exchange=exchange,
-        snapshots_collected=sum(len(snapshots) for snapshots in snapshots_by_symbol.values()),
-        snapshots_by_symbol={symbol: len(snapshots_by_symbol.get(symbol, [])) for symbol in symbols},
-        snapshots_requested=requested_snapshots * len(symbols),
-    )
-
-    output = _build_snapshot_output(
-        exchange=exchange,
-        symbols=symbols,
-        snapshots_by_symbol=snapshots_by_symbol,
-        requested_snapshots=requested_snapshots,
-        logger=logger,
-    )
-    parquet_files, parquet_error = _persist_bronze_snapshots(
-        snapshots_by_symbol=snapshots_by_symbol,
-        lake_root=cast(str, args.lake_root),
-        depth=int(args.levels),
-        enabled=bool(args.save_parquet_lake),
-        output=output,
-        logger=logger,
-    )
-    _log_dataset_debug_event(
-        logger,
-        BRONZE_BUILDER_COMMAND,
-        "persistence_complete",
-        dataset_type=PERPS_L2_DATASET_TYPE,
-        exchange=exchange,
-        files=len(parquet_files),
-        output_files=parquet_files,
-        parquet_error=parquet_error,
-        save_parquet_lake=bool(args.save_parquet_lake),
-    )
-
-    _emit_json_output(bool(args.json_output), output)
-    _log_bronze_builder_summary(
-        logger=logger,
-        exchange=exchange,
-        symbols=symbols,
-        snapshots_by_symbol=snapshots_by_symbol,
-        requested_snapshots=requested_snapshots,
-        parquet_files=parquet_files,
-        elapsed_s=perf_counter() - started_at,
-        parquet_error=parquet_error,
+        normalize_symbols=_normalize_cli_symbols,
+        fetch_snapshots=fetch_perps_l2_snapshot_1m_for_symbols,
+        save_snapshots=save_perps_l2_snapshot_1m_parquet_lake,
     )
 
 
