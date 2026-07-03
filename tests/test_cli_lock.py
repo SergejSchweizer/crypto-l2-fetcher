@@ -13,7 +13,7 @@ from zipfile import ZipFile
 import pytest
 
 from api import cli
-from api.commands import bronze
+from api.commands import bronze, perps_l2
 from api.commands import runtime as command_runtime
 from api.constants import (
     BRONZE_BUILDER_COMMAND,
@@ -412,22 +412,22 @@ def test_debug_logging_updates_logger_and_handlers() -> None:
         handler.close()
 
 
-def test_persist_bronze_snapshots_reports_parquet_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_persist_bronze_snapshots_reports_parquet_errors() -> None:
     """Verify Bronze parquet failures are surfaced in command output."""
 
     def raise_parquet_error(**_: object) -> list[str]:
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(bronze, "save_perps_l2_snapshot_1m_parquet_lake", raise_parquet_error)
     output: dict[str, object] = {}
 
-    files, error = bronze._persist_bronze_snapshots(
+    files, error = perps_l2.persist_bronze_snapshots(
         snapshots_by_symbol={},
         lake_root="lake/bronze",
         depth=50,
         enabled=True,
         output=output,
         logger=logging.getLogger("test_persist_bronze_snapshots_reports_parquet_errors"),
+        save_snapshots=raise_parquet_error,
     )
 
     assert files == []
