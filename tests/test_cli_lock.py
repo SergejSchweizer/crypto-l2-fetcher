@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -64,7 +66,7 @@ def _config(
         "runtime": {
             "log_dir": log_dir,
             "log_rotation_days": 7,
-            "log_backup_count": 0,
+            "log_backup_count": 3,
         },
         "ingestion": {
             "exchange": "deribit",
@@ -80,8 +82,8 @@ def _config(
     }
 
 
-def test_configure_logging_rotates_weekly_and_keeps_old_logs(tmp_path: Path) -> None:
-    """Verify runtime logging rotates weekly and keeps rotated logs."""
+def test_configure_logging_rotates_weekly_into_three_zip_archives(tmp_path: Path) -> None:
+    """Verify weekly archives are compressed and limited to three backups."""
 
     logger = configure_logging(
         module_name="test-weekly-rotation",
@@ -92,7 +94,47 @@ def test_configure_logging_rotates_weekly_and_keeps_old_logs(tmp_path: Path) -> 
 
         assert file_handler.when == "D"
         assert file_handler.interval == 7 * 24 * 60 * 60
-        assert file_handler.backupCount == 0
+        assert file_handler.backupCount == 3
+
+        logger.info("weekly evidence")
+        file_handler.flush()
+        file_handler.rolloverAt = int(time.time())
+        file_handler.doRollover()
+
+        archives = list((tmp_path / "logs").glob("test-weekly-rotation.log.*.zip"))
+        assert len(archives) == 1
+        with ZipFile(archives[0]) as archive:
+            assert archive.namelist() == ["test-weekly-rotation.log"]
+            assert "weekly evidence" in archive.read("test-weekly-rotation.log").decode("utf-8")
+        assert not list((tmp_path / "logs").glob("test-weekly-rotation.log.????-??-??"))
+    finally:
+        for handler in list(logger.handlers):
+            handler.close()
+            logger.removeHandler(handler)
+
+
+def test_configure_logging_selects_archives_older_than_three_weeks_for_deletion(
+    tmp_path: Path,
+) -> None:
+    """Verify retention selects only ZIP archives older than the latest three."""
+
+    log_dir = tmp_path / "logs"
+    logger = configure_logging(
+        module_name="test-weekly-retention",
+        config=_config(log_dir=str(log_dir)),
+    )
+    try:
+        file_handler = next(handler for handler in logger.handlers if isinstance(handler, TimedRotatingFileHandler))
+        archive_names = [
+            "test-weekly-retention.log.2026-05-24.zip",
+            "test-weekly-retention.log.2026-05-31.zip",
+            "test-weekly-retention.log.2026-06-07.zip",
+            "test-weekly-retention.log.2026-06-14.zip",
+        ]
+        for archive_name in archive_names:
+            (log_dir / archive_name).touch()
+
+        assert file_handler.getFilesToDelete() == [str(log_dir / archive_names[0])]
     finally:
         for handler in list(logger.handlers):
             handler.close()

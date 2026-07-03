@@ -1,1 +1,5 @@
 logfile: .logs/agents.log
+runtime:
+  log_dir: .logs
+  log_rotation_days: 7
+  log_backup_count: 3

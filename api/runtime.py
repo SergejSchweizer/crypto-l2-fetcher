@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from api.logging_common import ModuleScopeFilter, log_file_stem_for_module_name, unified_formatter
 from ingestion.config import Config, config_int, config_section, configured_log_dir, load_config
@@ -11,7 +13,42 @@ from ingestion.config import Config, config_int, config_section, configured_log_
 LOGGER_NAME = "crypto_live_loader"
 DEFAULT_LOG_DIR = ".logs"
 DEFAULT_LOG_ROTATION_DAYS = 7
-DEFAULT_LOG_BACKUP_COUNT = 0
+DEFAULT_LOG_BACKUP_COUNT = 3
+
+
+def _zip_archive_name(default_name: str) -> str:
+    """Return the dated ZIP archive name used by the rotating handler."""
+
+    return f"{default_name}.zip"
+
+
+def _zip_rotated_log(source: str, destination: str) -> None:
+    """Atomically compress a rotated logfile and remove its source.
+
+    Args:
+        source (str): Active logfile path selected for rotation.
+        destination (str): Final dated ZIP archive path.
+
+    Raises:
+        OSError: If the source cannot be read or the archive cannot be written.
+    """
+
+    source_path = Path(source)
+    destination_path = Path(destination)
+    temporary_path = destination_path.with_suffix(f"{destination_path.suffix}.tmp")
+    try:
+        with ZipFile(
+            temporary_path,
+            mode="w",
+            compression=ZIP_DEFLATED,
+            compresslevel=9,
+        ) as archive:
+            archive.write(source_path, arcname=source_path.name)
+        temporary_path.replace(destination_path)
+        source_path.unlink()
+    except OSError:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def _safe_log_module_name(module_name: str) -> str:
@@ -51,6 +88,8 @@ def configure_logging(module_name: str = "crypto-live-loader", config: Config | 
             utc=True,
         )
         file_handler.suffix = "%Y-%m-%d"
+        file_handler.namer = _zip_archive_name
+        file_handler.rotator = _zip_rotated_log
         file_handler.setFormatter(formatter)
         file_handler.addFilter(scope_filter)
         logger.addHandler(file_handler)
