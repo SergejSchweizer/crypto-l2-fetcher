@@ -153,6 +153,7 @@ config.yaml
 pyproject.toml
 main.py
 README.md
+ARCHITECTURE.md
 AGENTS.md
 ```
 
@@ -170,6 +171,7 @@ AGENTS.md
 | `config.yaml` | Canonical runtime configuration file |
 | `pyproject.toml` | Project metadata and Python quality-tool configuration |
 | `main.py` | Python entrypoint wrapper for CLI execution |
+| `ARCHITECTURE.md` | Maintained architecture contract covering layers, dataset contracts, runtime flow, storage, and update rules |
 | `AGENTS.md` | Generated repository operating policy |
 | `RISKS.md` | Active risk register and mitigation status |
 | `TIMELINE.md` | Chronological record of dataset, runtime, and operational milestones |

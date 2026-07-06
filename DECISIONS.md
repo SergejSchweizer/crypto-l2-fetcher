@@ -1,6 +1,6 @@
 # Decisions
 
-Last updated: 2026-07-02
+Last updated: 2026-07-06
 
 This file records durable technical and operational decisions. Update it when a pull request changes
 dataset naming, contracts, architecture boundaries, scheduling assumptions, storage semantics, or
@@ -18,6 +18,7 @@ observability conventions.
 | D-006 | 2026-07-02 | Preserve logical SOL requests while sourcing Deribit `USDC` endpoints where required. | Active | Rows carry requested/source currency metadata so downstream joins can audit SOL/USDC mapping. |
 | D-007 | 2026-07-02 | Use local parquet Bronze storage with deterministic upserts. | Active | Local operation stays inspectable and reproducible; distributed coordination and remote durability are separate future work. |
 | D-008 | 2026-07-02 | Keep debug logging expressive and dataset-scoped. | Active | `--debug` should expose request scope, source mappings, row counts, persistence paths, and collector timing or window parameters. |
+| D-009 | 2026-07-06 | Maintain `ARCHITECTURE.md` as the repository architecture contract. | Active | Architecture-impacting changes must update the document in the same commit so layer boundaries, dataset contracts, runtime flow, and storage semantics do not drift from implementation. |
 
 ## Decision Update Rules
 
