@@ -35,7 +35,7 @@ def test_option_instrument_ticker_normalizes_iv_and_greeks() -> None:
     )
 
     assert errors == []
-    assert rows[0].dataset_type == "option_instrument_ticker_snapshot_1m"
+    assert rows[0].dataset_type == "options_instrument_ticker_snapshot_1m"
     assert rows[0].currency == "BTC"
     assert rows[0].bid_iv == 54.1
     assert rows[0].ask_iv == 55.2

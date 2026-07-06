@@ -49,7 +49,7 @@ def _isolate_cli_test_logs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 def _sample_row(instrument_name: str) -> OptionInstrumentTickerSnapshotRow:
     return OptionInstrumentTickerSnapshotRow(
         exchange="deribit",
-        dataset_type="option_instrument_ticker_snapshot_1m",
+        dataset_type="options_instrument_ticker_snapshot_1m",
         source="rest_ticker",
         currency=instrument_name.split("-", 1)[0].removesuffix("_USDC"),
         instrument_name=instrument_name,
@@ -126,7 +126,7 @@ def test_option_instrument_ticker_cli_uses_explicit_instruments(
     output = json.loads(capsys.readouterr().out)
 
     assert output["command"] == OPTION_INSTRUMENT_TICKER_BRONZE_BUILDER_COMMAND
-    assert output["dataset_type"] == "option_instrument_ticker_snapshot_1m"
+    assert output["dataset_type"] == "options_instrument_ticker_snapshot_1m"
     assert output["instruments_requested"] == 1
     assert output["instruments_discovered"] == 1
     assert output["rows_written"] == 1

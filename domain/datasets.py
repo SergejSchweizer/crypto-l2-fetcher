@@ -43,9 +43,9 @@ OPTIONS_TICKER_SNAPSHOT_1M = DatasetContract(
     description="Broad option-chain summary rows.",
 )
 OPTION_INSTRUMENT_TICKER_SNAPSHOT_1M = DatasetContract(
-    dataset_type="option_instrument_ticker_snapshot_1m",
+    dataset_type="options_instrument_ticker_snapshot_1m",
     layer="bronze",
-    log_stem="option_instrument_ticker_snapshot_1m",
+    log_stem="options_instrument_ticker_snapshot_1m",
     partition_columns=("exchange", "instrument_name", "source", "snapshot_time"),
     source="rest_ticker",
     description="Selected per-option ticker rows with IV and Greeks.",

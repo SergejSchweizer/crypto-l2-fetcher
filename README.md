@@ -25,7 +25,7 @@ Author: Sergej Schweizer
 - [4. Bronze Datasets](#4-bronze-datasets)
   - [4.1 Perpetual L2 Order Book (`dataset_type=perps_l2_snapshot_1m`)](#41-perpetual-l2-order-book-dataset_typeperps_l2_snapshot_1m)
   - [4.2 Options Summary (`dataset_type=options_ticker_snapshot_1m`)](#42-options-summary-dataset_typeoptions_ticker_snapshot_1m)
-  - [4.3 Option Instrument Ticker (`dataset_type=option_instrument_ticker_snapshot_1m`)](#43-option-instrument-ticker-dataset_typeoption_instrument_ticker_snapshot_1m)
+  - [4.3 Option Instrument Ticker (`dataset_type=options_instrument_ticker_snapshot_1m`)](#43-option-instrument-ticker-dataset_typeoptions_instrument_ticker_snapshot_1m)
   - [4.4 Option L2 Order Book (`dataset_type=options_l2_snapshot_1m`)](#44-option-l2-order-book-dataset_typeoptions_l2_snapshot_1m)
   - [4.5 Instrument Metadata (`dataset_type=instrument_metadata_snapshot_daily`)](#45-instrument-metadata-dataset_typeinstrument_metadata_snapshot_daily)
   - [4.6 Index Price (`dataset_type=index_price_snapshot_1m`)](#46-index-price-dataset_typeindex_price_snapshot_1m)
@@ -106,7 +106,7 @@ Options:
 | CLI Command | Bronze `dataset_type` | Instrument Type | Default Symbols | Source Endpoint | Description |
 |---|---|---|---|---|---|
 | `options-bronze-builder` | `options_ticker_snapshot_1m` | `option` | `BTC ETH SOL` | `public/get_book_summary_by_currency` | Broad option-chain summary rows |
-| `option-instrument-ticker-bronze-builder` | `option_instrument_ticker_snapshot_1m` | `option` | `BTC ETH SOL` | `public/ticker` | Selected per-option IV, bid/ask IV, and Greeks |
+| `option-instrument-ticker-bronze-builder` | `options_instrument_ticker_snapshot_1m` | `option` | `BTC ETH SOL` | `public/ticker` | Selected per-option IV, bid/ask IV, and Greeks |
 | `options-l2-bronze-builder` | `options_l2_snapshot_1m` | `option` | `BTC ETH SOL` | `public/get_order_book` | Selected per-option bid/ask depth and top-of-book IV context |
 | `futures-summary-bronze-builder` | `futures_summary_snapshot_1m` | `future`, `perp` | `BTC ETH SOL` | `public/get_book_summary_by_currency` | Dated futures and perpetual curve summary rows |
 | `recent-trades-bronze-builder` | `recent_trade_snapshot_1m` | `option`, `future`, `perp` | `BTC ETH SOL` | `public/get_last_trades_by_currency` | Recent trade tape for options, futures, and perpetuals |
@@ -333,7 +333,7 @@ Fetched columns:
 | Underlying/carry | `underlying_price`, `underlying_index`, `interest_rate` |
 | Liquidity/activity | `open_interest`, `volume`, `volume_usd`, `high`, `low` |
 
-## 4.3 Option Instrument Ticker (`dataset_type=option_instrument_ticker_snapshot_1m`)
+## 4.3 Option Instrument Ticker (`dataset_type=options_instrument_ticker_snapshot_1m`)
 
 ### 1. Bronze Layer
 
@@ -367,7 +367,7 @@ Coverage contract:
 
 | Item | Contract |
 |---|---|
-| Target dataset | `option_instrument_ticker_snapshot_1m` |
+| Target dataset | `options_instrument_ticker_snapshot_1m` |
 | Live endpoint owner | `crypto-live-loader` only |
 | Downstream owner | History/research repositories consume Bronze and build Silver/Gold surfaces |
 | Assets | BTC, ETH, SOL |
@@ -658,7 +658,7 @@ lake/bronze/
     exchange=<exchange>/instrument_type=perp/symbol=<symbol>/depth=<depth>/source=rest_order_book/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=options_ticker_snapshot_1m/
     exchange=<exchange>/instrument_type=option/currency=<currency>/source=<source>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
-  dataset_type=option_instrument_ticker_snapshot_1m/
+  dataset_type=options_instrument_ticker_snapshot_1m/
     exchange=<exchange>/instrument_type=option/currency=<currency>/instrument_name=<instrument_name>/source=<source>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=options_l2_snapshot_1m/
     exchange=<exchange>/instrument_type=option/symbol=<currency>/depth=<depth>/source=rest_order_book/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
@@ -815,7 +815,7 @@ Upsert-based datasets merge by natural keys and deterministic sort order:
 |---|---|
 | `perps_l2_snapshot_1m` | `exchange`, `instrument_type`, `symbol`, `depth`, `source`, `event_time` |
 | `options_ticker_snapshot_1m` | `exchange`, `currency`, `instrument_name`, `source`, `snapshot_time` |
-| `option_instrument_ticker_snapshot_1m` | `exchange`, `instrument_name`, `source`, `snapshot_time` |
+| `options_instrument_ticker_snapshot_1m` | `exchange`, `instrument_name`, `source`, `snapshot_time` |
 | `options_l2_snapshot_1m` | `exchange`, `symbol`, `source`, `depth`, `event_time` |
 | `instrument_metadata_snapshot_daily` | `exchange`, `instrument_name`, `snapshot_date` |
 | `future_instrument_metadata_snapshot_daily` | `exchange`, `instrument_name`, `snapshot_date` |
@@ -832,7 +832,7 @@ Upsert-based datasets merge by natural keys and deterministic sort order:
 - Current dataset log files:
   - `perps_l2_snapshot_1m.log`
   - `options_ticker_snapshot_1m.log`
-  - `option_instrument_ticker_snapshot_1m.log`
+  - `options_instrument_ticker_snapshot_1m.log`
   - `options_l2_snapshot_1m.log`
   - `instrument_metadata_snapshot_daily.log`
   - `future_instrument_metadata_snapshot_daily.log`

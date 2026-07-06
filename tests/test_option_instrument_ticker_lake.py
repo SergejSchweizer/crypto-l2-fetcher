@@ -19,7 +19,7 @@ def _sample_row(raw_payload_hash: str = "abc") -> OptionInstrumentTickerSnapshot
     snapshot_time = datetime(2026, 5, 24, 7, 15, tzinfo=UTC)
     return OptionInstrumentTickerSnapshotRow(
         exchange="deribit",
-        dataset_type="option_instrument_ticker_snapshot_1m",
+        dataset_type="options_instrument_ticker_snapshot_1m",
         source="rest_ticker",
         currency="BTC",
         instrument_name="BTC-30JUN26-120000-C",
@@ -67,7 +67,7 @@ def test_option_instrument_ticker_partition_path() -> None:
     result = option_instrument_ticker_partition_path(
         "lake/bronze",
         (
-            "option_instrument_ticker_snapshot_1m",
+            "options_instrument_ticker_snapshot_1m",
             "deribit",
             "option",
             "BTC",
@@ -81,7 +81,7 @@ def test_option_instrument_ticker_partition_path() -> None:
     )
 
     assert str(result).endswith(
-        "dataset_type=option_instrument_ticker_snapshot_1m/exchange=deribit/instrument_type=option/"
+        "dataset_type=options_instrument_ticker_snapshot_1m/exchange=deribit/instrument_type=option/"
         "currency=BTC/instrument_name=BTC-30JUN26-120000-C/source=rest_ticker/year=2026/month=05/"
         "date=24/hour=07"
     )
