@@ -67,9 +67,9 @@ INSTRUMENT_METADATA_SNAPSHOT_DAILY = DatasetContract(
     description="Active option instrument metadata snapshots.",
 )
 FUTURE_INSTRUMENT_METADATA_SNAPSHOT_DAILY = DatasetContract(
-    dataset_type="future_instrument_metadata_snapshot_daily",
+    dataset_type="futures_instrument_metadata_snapshot_daily",
     layer="bronze",
-    log_stem="future_instrument_metadata_snapshot_daily",
+    log_stem="futures_instrument_metadata_snapshot_daily",
     partition_columns=("exchange", "instrument_name", "snapshot_date"),
     source="rest_get_instruments",
     description="Active future and perpetual instrument metadata snapshots.",

@@ -110,7 +110,7 @@ Options:
 | `options-l2-bronze-builder` | `options_l2_snapshot_1m` | `option` | `BTC ETH SOL` | `public/get_order_book` | Selected per-option bid/ask depth and top-of-book IV context |
 | `futures-summary-bronze-builder` | `futures_summary_snapshot_1m` | `future`, `perp` | `BTC ETH SOL` | `public/get_book_summary_by_currency` | Dated futures and perpetual curve summary rows |
 | `recent-trades-bronze-builder` | `recent_trade_snapshot_1m` | `option`, `future`, `perp` | `BTC ETH SOL` | `public/get_last_trades_by_currency` | Recent trade tape for options, futures, and perpetuals |
-| `instrument-metadata-bronze-builder` | `instrument_metadata_snapshot_daily`, `future_instrument_metadata_snapshot_daily` | `option`, `future` | `BTC ETH SOL` | `public/get_instruments` | Active instrument metadata snapshots |
+| `instrument-metadata-bronze-builder` | `instrument_metadata_snapshot_daily`, `futures_instrument_metadata_snapshot_daily` | `option`, `future` | `BTC ETH SOL` | `public/get_instruments` | Active instrument metadata snapshots |
 
 Index State:
 
@@ -489,7 +489,7 @@ SOL metadata mapping:
 - Logical `SOL` uses Deribit `currency=USDC`.
 - Rows are filtered to instruments starting with `SOL_USDC-`.
 - `kind=option` writes `dataset_type=instrument_metadata_snapshot_daily`.
-- `kind=future` writes `dataset_type=future_instrument_metadata_snapshot_daily`.
+- `kind=future` writes `dataset_type=futures_instrument_metadata_snapshot_daily`.
 
 Key fields:
 
@@ -666,7 +666,7 @@ lake/bronze/
     exchange=<exchange>/instrument_type=option/symbol=<currency>/depth=<depth>/source=rest_order_book/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=instrument_metadata_snapshot_daily/
     exchange=<exchange>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
-  dataset_type=future_instrument_metadata_snapshot_daily/
+  dataset_type=futures_instrument_metadata_snapshot_daily/
     exchange=<exchange>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
   dataset_type=index_price_snapshot_1m/
     exchange=<exchange>/index_name=<index_name>/year=YYYY/month=MM/date=DD/hour=HH/data.parquet
@@ -820,7 +820,7 @@ Upsert-based datasets merge by natural keys and deterministic sort order:
 | `options_instrument_ticker_snapshot_1m` | `exchange`, `instrument_name`, `source`, `snapshot_time` |
 | `options_l2_snapshot_1m` | `exchange`, `symbol`, `source`, `depth`, `event_time` |
 | `instrument_metadata_snapshot_daily` | `exchange`, `instrument_name`, `snapshot_date` |
-| `future_instrument_metadata_snapshot_daily` | `exchange`, `instrument_name`, `snapshot_date` |
+| `futures_instrument_metadata_snapshot_daily` | `exchange`, `instrument_name`, `snapshot_date` |
 | `index_price_snapshot_1m` | `exchange`, `index_name`, `event_time`, `source` |
 | `volatility_index_snapshot_1m` | `exchange`, `currency`, `timestamp`, `resolution` |
 | `futures_summary_snapshot_1m` | `exchange`, `instrument_name`, `source`, `snapshot_time` |
@@ -837,7 +837,7 @@ Upsert-based datasets merge by natural keys and deterministic sort order:
   - `options_instrument_ticker_snapshot_1m.log`
   - `options_l2_snapshot_1m.log`
   - `instrument_metadata_snapshot_daily.log`
-  - `future_instrument_metadata_snapshot_daily.log`
+  - `futures_instrument_metadata_snapshot_daily.log`
   - `index_price_snapshot_1m.log`
   - `volatility_index_snapshot_1m.log`
   - `futures_summary_snapshot_1m.log`

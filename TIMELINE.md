@@ -1,10 +1,16 @@
 # Timeline
 
-Last updated: 2026-07-02
+Last updated: 2026-07-06
 
 This file records notable repository milestones that affect data coverage, runtime behavior,
 operational contracts, or downstream compatibility. Update it in the same pull request as the
 change it describes.
+
+## 2026-07-06
+
+| Change | Impact |
+|---|---|
+| Renamed futures instrument metadata to `futures_instrument_metadata_snapshot_daily`. | Code, docs, tests, local Bronze directory naming, in-file parquet `dataset_type` values, and log naming now use plural `futures` consistently. |
 
 ## 2026-07-02
 

@@ -19,6 +19,7 @@ observability conventions.
 | D-007 | 2026-07-02 | Use local parquet Bronze storage with deterministic upserts. | Active | Local operation stays inspectable and reproducible; distributed coordination and remote durability are separate future work. |
 | D-008 | 2026-07-02 | Keep debug logging expressive and dataset-scoped. | Active | `--debug` should expose request scope, source mappings, row counts, persistence paths, and collector timing or window parameters. |
 | D-009 | 2026-07-06 | Maintain `ARCHITECTURE.md` as the repository architecture contract. | Active | Architecture-impacting changes must update the document in the same commit so layer boundaries, dataset contracts, runtime flow, and storage semantics do not drift from implementation. |
+| D-010 | 2026-07-06 | Name the futures instrument metadata dataset `futures_instrument_metadata_snapshot_daily`. | Active | The persisted dataset, logfile stem, documentation, and tests use plural `futures` to align with other futures-oriented dataset names. |
 
 ## Decision Update Rules
 

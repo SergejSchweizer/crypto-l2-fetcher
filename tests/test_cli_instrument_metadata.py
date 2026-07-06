@@ -102,4 +102,4 @@ def test_cli_future_instrument_metadata_reports_future_dataset(
     cli.main()
     output = json.loads(capsys.readouterr().out)
 
-    assert output["dataset_type"] == "future_instrument_metadata_snapshot_daily"
+    assert output["dataset_type"] == "futures_instrument_metadata_snapshot_daily"
