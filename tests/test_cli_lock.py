@@ -184,7 +184,7 @@ def test_log_module_name_for_future_instrument_metadata_uses_dataset() -> None:
 
     args = cli.build_parser().parse_args([INSTRUMENT_METADATA_BRONZE_BUILDER_COMMAND, "--kind", "future"])
 
-    assert bronze.log_module_name_for_args(args) == "future_instrument_metadata_snapshot_daily"
+    assert bronze.log_module_name_for_args(args) == "futures_instrument_metadata_snapshot_daily"
 
 
 def test_l2_parser_defaults_can_come_from_config() -> None:

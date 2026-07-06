@@ -69,7 +69,7 @@ The current Bronze datasets are:
 | `options_instrument_ticker_snapshot_1m` | `rest_ticker` | `exchange`, `instrument_name`, `source`, `snapshot_time` |
 | `options_l2_snapshot_1m` | `rest_order_book` | `exchange`, `symbol`, `source`, `depth`, `event_time` |
 | `instrument_metadata_snapshot_daily` | `rest_get_instruments` | `exchange`, `instrument_name`, `snapshot_date` |
-| `future_instrument_metadata_snapshot_daily` | `rest_get_instruments` | `exchange`, `instrument_name`, `snapshot_date` |
+| `futures_instrument_metadata_snapshot_daily` | `rest_get_instruments` | `exchange`, `instrument_name`, `snapshot_date` |
 | `index_price_snapshot_1m` | `rest_get_index_price` | `exchange`, `index_name`, `event_time` |
 | `volatility_index_snapshot_1m` | `rest_get_volatility_index_data` | `exchange`, `currency`, `source`, `event_time` |
 | `futures_summary_snapshot_1m` | `rest_get_book_summary_by_currency` | `exchange`, `instrument_name`, `source`, `snapshot_time` |
